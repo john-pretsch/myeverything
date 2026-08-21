@@ -15,14 +15,23 @@ export type User = {
   name: string;
   email: string;
   role: string;
+  two_factor_enabled: boolean;
 };
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
+type LoginResult =
+  | { twoFactorRequired: false }
+  | { twoFactorRequired: true; loginToken: string };
+
 type AuthContextValue = {
   user: User | null;
   status: AuthStatus;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  verifyTwoFactorLogin: (
+    loginToken: string,
+    input: { code?: string; recoveryCode?: string },
+  ) => Promise<void>;
   register: (
     name: string,
     email: string,
@@ -30,6 +39,7 @@ type AuthContextValue = {
     passwordConfirmation: string,
   ) => Promise<void>;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -72,8 +82,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      await apiFetch("/api/login", { method: "POST", body: { email, password } });
+    async (email: string, password: string): Promise<LoginResult> => {
+      const res = await apiFetch<{ two_factor_required?: boolean; login_token?: string }>(
+        "/api/login",
+        { method: "POST", body: { email, password } },
+      );
+
+      if (res.two_factor_required && res.login_token) {
+        return { twoFactorRequired: true, loginToken: res.login_token };
+      }
+
+      await refresh();
+      return { twoFactorRequired: false };
+    },
+    [refresh],
+  );
+
+  const verifyTwoFactorLogin = useCallback(
+    async (loginToken: string, input: { code?: string; recoveryCode?: string }) => {
+      await apiFetch("/api/two-factor-challenge", {
+        method: "POST",
+        body: {
+          login_token: loginToken,
+          code: input.code,
+          recovery_code: input.recoveryCode,
+        },
+      });
       await refresh();
     },
     [refresh],
@@ -107,7 +141,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, status, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, status, login, verifyTwoFactorLogin, register, logout, refresh }}
+    >
       {children}
     </AuthContext.Provider>
   );

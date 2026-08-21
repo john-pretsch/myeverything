@@ -1,0 +1,21 @@
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+
+class EnsureFeatureEnabled
+{
+    public function handle(Request $request, Closure $next, string $feature): Response
+    {
+        if (! config("features.{$feature}")) {
+            return response()->json([
+                'message' => 'This feature is not currently available.',
+            ], 403);
+        }
+
+        return $next($request);
+    }
+}

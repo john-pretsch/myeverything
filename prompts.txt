@@ -1,0 +1,25 @@
+GOAL
+Build an application which will serve as my daily dashboard.
+
+CONSTRAINTS
+- Language: PHP 8.5, Laravel 13, Next.js
+- Database: MySQL 8
+
+FRONTEND
+- tabbed interface, some tabs with require logged in user
+-
+
+Features:
+- authentication and basic permissions
+
+TABS:
+- news feed: add and remove and rank sources, topics. Add a fea
+
+- market info: basic market data for currencies, crypto currencies, major stock markets (TSX NYSE NASDAQ)
+- todo (must be loggedin): user defined
+- gig leads (must be logged in): pull leads from linked in, arc, indeed, gun.info
+- weather get basic forcast and radar map from weather.gc.ca
+
+produce a suitable CLAUDE.md file
+
+Let's start with the news feed. I

@@ -47,6 +47,9 @@ export function TabNav() {
           {status === "authenticated" && user ? (
             <div className="flex items-center gap-3">
               <span className="text-zinc-500">{user.email}</span>
+              <Link href="/account" className="font-medium hover:underline">
+                Account
+              </Link>
               <button
                 type="button"
                 onClick={() => logout()}

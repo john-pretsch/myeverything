@@ -11887,3 +11887,2129 @@ Ignored files:
 _**Agent (claude-sonnet-5 2026-08-18 18:50:30Z)**_
 
 Confirmed — `api/.env` (real DB credentials) is properly excluded via `api/.gitignore:3:.env`, not staged. Safe to commit whenever you're ready; nothing sensitive is in the staged set.
+
+---
+
+_**User (2026-08-18 19:24:00Z)**_
+
+lets's build out the todo. There should be an option to create daily, weekly or some customized interval. Also one off's.
+
+---
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:06Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Generate todo migrations, models, policy, controller, resource
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/api && sudo -u www-data php artisan make:migration create_todos_table && \
+sudo -u www-data php artisan make:migration create_todo_completions_table && \
+sudo -u www-data php artisan make:model Todo && \
+sudo -u www-data php artisan make:model TodoCompletion && \
+sudo -u www-data php artisan make:policy TodoPolicy --model=Todo && \
+sudo -u www-data php artisan make:controller TodoController && \
+sudo -u www-data php artisan make:resource TodoResource 2>&1
+```
+
+```text
+   INFO  Migration [database/migrations/2026_08_18_192505_create_todos_table.php] created successfully.  
+
+
+   INFO  Migration [database/migrations/2026_08_18_192506_create_todo_completions_table.php] created successfully.  
+
+
+   INFO  Model [app/Models/Todo.php] created successfully.  
+
+
+   INFO  Model [app/Models/TodoCompletion.php] created successfully.  
+
+
+   INFO  Policy [app/Policies/TodoPolicy.php] created successfully.  
+
+
+   INFO  Controller [app/Http/Controllers/TodoController.php] created successfully.  
+
+
+   INFO  Resource [app/Http/Resources/TodoResource.php] created successfully.
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:08Z)**_
+
+Now the migrations.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:11Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```php
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('todos', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->string('title');
+            $table->text('description')->nullable();
+            $table->enum('recurrence', ['once', 'daily', 'weekly', 'custom']);
+            $table->unsignedInteger('interval_days')->nullable();
+            $table->date('start_date');
+            $table->unsignedInteger('position')->default(0);
+            $table->timestamps();
+
+            $table->index(['user_id', 'position']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('todos');
+    }
+};
+
+```
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/database/migrations/2026_08_18_192505_create_todos_table.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:15Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```php
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('todo_completions', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('todo_id')->constrained()->cascadeOnDelete();
+            $table->date('completed_on');
+            $table->timestamps();
+
+            $table->unique(['todo_id', 'completed_on']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('todo_completions');
+    }
+};
+
+```
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/database/migrations/2026_08_18_192506_create_todo_completions_table.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:18Z)**_
+
+Now the models.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:22Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```php
+<?php
+
+namespace App\Models;
+
+use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+#[Fillable(['title', 'description', 'recurrence', 'interval_days', 'start_date'])]
+class Todo extends Model
+{
+    /** @use HasFactory<\Database\Factories\TodoFactory> */
+    use HasFactory;
+
+    protected function casts(): array
+    {
+        return [
+            'start_date' => 'date',
+            'interval_days' => 'integer',
+        ];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function completions(): HasMany
+    {
+        return $this->hasMany(TodoCompletion::class);
+    }
+
+    /**
+     * Whether this todo has an occurrence falling on the given date.
+     */
+    public function isDueOn(CarbonInterface $date): bool
+    {
+        $date = $date->copy()->startOfDay();
+        $start = $this->start_date->copy()->startOfDay();
+
+        if ($date->lt($start)) {
+            return false;
+        }
+
+        return match ($this->recurrence) {
+            'once' => $date->equalTo($start),
+            'daily' => true,
+            'weekly' => $start->diffInDays($date) % 7 === 0,
+            'custom' => $start->diffInDays($date) % max(1, (int) $this->interval_days) === 0,
+            default => false,
+        };
+    }
+}
+
+```
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Models/Todo.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:26Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+#[Fillable(['todo_id', 'completed_on'])]
+class TodoCompletion extends Model
+{
+    /** @use HasFactory<\Database\Factories\TodoCompletionFactory> */
+    use HasFactory;
+
+    protected function casts(): array
+    {
+        return [
+            'completed_on' => 'date',
+        ];
+    }
+
+    public function todo(): BelongsTo
+    {
+        return $this->belongsTo(Todo::class);
+    }
+}
+
+```
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Models/TodoCompletion.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:28Z)**_
+
+Now the User relation, the policy, and the resource.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:28Z)**_
+
+<tool-use data-tool-type="read" data-tool-name="Read"><details>
+<summary>Tool use: **Read**</summary>
+ `./api/app/Models/User.php`
+
+```text
+1	<?php
+2	
+3	namespace App\Models;
+4	
+5	// use Illuminate\Contracts\Auth\MustVerifyEmail;
+6	use Database\Factories\UserFactory;
+7	use Illuminate\Database\Eloquent\Attributes\Fillable;
+8	use Illuminate\Database\Eloquent\Attributes\Hidden;
+9	use Illuminate\Database\Eloquent\Factories\HasFactory;
+10	use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+11	use Illuminate\Database\Eloquent\Relations\HasMany;
+12	use Illuminate\Foundation\Auth\User as Authenticatable;
+13	use Illuminate\Notifications\Notifiable;
+14	use Laravel\Sanctum\HasApiTokens;
+15	
+16	#[Fillable(['name', 'email', 'password'])]
+17	#[Hidden(['password', 'remember_token'])]
+18	class User extends Authenticatable
+19	{
+20	    /** @use HasFactory<UserFactory> */
+21	    use HasApiTokens, HasFactory, Notifiable;
+22	
+23	    /**
+24	     * Get the attributes that should be cast.
+25	     *
+26	     * @return array<string, string>
+27	     */
+28	    protected function casts(): array
+29	    {
+30	        return [
+31	            'email_verified_at' => 'datetime',
+32	            'password' => 'hashed',
+33	        ];
+34	    }
+35	
+36	    public function newsSources(): BelongsToMany
+37	    {
+38	        return $this->belongsToMany(NewsSource::class, 'news_source_user')
+39	            ->withPivot('position')
+40	            ->withTimestamps()
+41	            ->orderByPivot('position');
+42	    }
+43	
+44	    public function newsArticleFeedback(): HasMany
+45	    {
+46	        return $this->hasMany(NewsArticleFeedback::class);
+47	    }
+48	}
+49
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:32Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Models/User.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:34Z)**_
+
+<tool-use data-tool-type="read" data-tool-name="Read"><details>
+<summary>Tool use: **Read**</summary>
+ `./api/app/Policies/TodoPolicy.php`
+
+```text
+1	<?php
+2	
+3	namespace App\Policies;
+4	
+5	use App\Models\Todo;
+6	use App\Models\User;
+7	use Illuminate\Auth\Access\Response;
+8	
+9	class TodoPolicy
+10	{
+11	    /**
+12	     * Determine whether the user can view any models.
+13	     */
+14	    public function viewAny(User $user): bool
+15	    {
+16	        return false;
+17	    }
+18	
+19	    /**
+20	     * Determine whether the user can view the model.
+21	     */
+22	    public function view(User $user, Todo $todo): bool
+23	    {
+24	        return false;
+25	    }
+26	
+27	    /**
+28	     * Determine whether the user can create models.
+29	     */
+30	    public function create(User $user): bool
+31	    {
+32	        return false;
+33	    }
+34	
+35	    /**
+36	     * Determine whether the user can update the model.
+37	     */
+38	    public function update(User $user, Todo $todo): bool
+39	    {
+40	        return false;
+41	    }
+42	
+43	    /**
+44	     * Determine whether the user can delete the model.
+45	     */
+46	    public function delete(User $user, Todo $todo): bool
+47	    {
+48	        return false;
+49	    }
+50	
+51	    /**
+52	     * Determine whether the user can restore the model.
+53	     */
+54	    public function restore(User $user, Todo $todo): bool
+55	    {
+56	        return false;
+57	    }
+58	
+59	    /**
+60	     * Determine whether the user can permanently delete the model.
+61	     */
+62	    public function forceDelete(User $user, Todo $todo): bool
+63	    {
+64	        return false;
+65	    }
+66	}
+67
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:38Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```php
+<?php
+
+namespace App\Policies;
+
+use App\Models\Todo;
+use App\Models\User;
+
+class TodoPolicy
+{
+    public function update(User $user, Todo $todo): bool
+    {
+        return $user->id === $todo->user_id;
+    }
+
+    public function delete(User $user, Todo $todo): bool
+    {
+        return $user->id === $todo->user_id;
+    }
+}
+
+```
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Policies/TodoPolicy.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:40Z)**_
+
+Now the resource.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:42Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```php
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class TodoResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'title' => $this->title,
+            'description' => $this->description,
+            'recurrence' => $this->recurrence,
+            'interval_days' => $this->interval_days,
+            'start_date' => $this->start_date->toDateString(),
+            'position' => $this->position,
+            'due_today' => $this->due_today,
+            'completed_today' => $this->completed_today,
+        ];
+    }
+}
+
+```
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Http/Resources/TodoResource.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:44Z)**_
+
+Now the controller — the core logic.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:52Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Resources\TodoResource;
+use App\Models\Todo;
+use App\Models\TodoCompletion;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+
+class TodoController extends Controller
+{
+    public function index(Request $request)
+    {
+        $todos = $request->user()->todos()->get();
+        $today = now()->startOfDay();
+
+        $completedTodayIds = TodoCompletion::whereIn('todo_id', $todos->pluck('id'))
+            ->whereDate('completed_on', $today->toDateString())
+            ->pluck('todo_id');
+
+        $todos->each(function (Todo $todo) use ($today, $completedTodayIds) {
+            $todo->due_today = $todo->isDueOn($today);
+            $todo->completed_today = $completedTodayIds->contains($todo->id);
+        });
+
+        return TodoResource::collection($todos);
+    }
+
+    public function store(Request $request)
+    {
+        $validated = $this->validated($request);
+
+        $nextPosition = (int) ($request->user()->todos()->max('position') ?? -1) + 1;
+
+        $todo = $request->user()->todos()->create([
+            ...$validated,
+            'position' => $nextPosition,
+        ]);
+
+        $todo->due_today = $todo->isDueOn(now()->startOfDay());
+        $todo->completed_today = false;
+
+        return new TodoResource($todo);
+    }
+
+    public function update(Request $request, Todo $todo)
+    {
+        $this->authorize('update', $todo);
+
+        $validated = $this->validated($request);
+        $todo->update($validated);
+
+        $today = now()->startOfDay();
+        $todo->due_today = $todo->isDueOn($today);
+        $todo->completed_today = $todo->completions()
+            ->whereDate('completed_on', $today->toDateString())
+            ->exists();
+
+        return new TodoResource($todo);
+    }
+
+    public function destroy(Request $request, Todo $todo)
+    {
+        $this->authorize('delete', $todo);
+
+        $todo->delete();
+
+        return response()->noContent();
+    }
+
+    public function reorder(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'todo_ids' => ['required', 'array'],
+            'todo_ids.*' => ['integer'],
+        ]);
+
+        $ownedIds = $user->todos()->pluck('id');
+
+        foreach (array_values($validated['todo_ids']) as $position => $todoId) {
+            if (! $ownedIds->contains($todoId)) {
+                continue;
+            }
+
+            DB::table('todos')
+                ->where('id', $todoId)
+                ->where('user_id', $user->id)
+                ->update(['position' => $position]);
+        }
+
+        return $this->index($request);
+    }
+
+    public function toggle(Request $request, Todo $todo)
+    {
+        $this->authorize('update', $todo);
+
+        $today = now()->toDateString();
+
+        $completion = $todo->completions()->whereDate('completed_on', $today)->first();
+
+        if ($completion) {
+            $completion->delete();
+            $completedToday = false;
+        } else {
+            $todo->completions()->create(['completed_on' => $today]);
+            $completedToday = true;
+        }
+
+        $todo->due_today = $todo->isDueOn(now()->startOfDay());
+        $todo->completed_today = $completedToday;
+
+        return new TodoResource($todo);
+    }
+
+    private function validated(Request $request): array
+    {
+        return $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:2000'],
+            'recurrence' => ['required', Rule::in(['once', 'daily', 'weekly', 'custom'])],
+            'interval_days' => ['required_if:recurrence,custom', 'nullable', 'integer', 'min:2', 'max:365'],
+            'start_date' => ['required', 'date'],
+        ]);
+    }
+}
+
+```
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Http/Controllers/TodoController.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:25:56Z)**_
+
+<tool-use data-tool-type="read" data-tool-name="Read"><details>
+<summary>Tool use: **Read**</summary>
+ `./api/app/Http/Controllers/Controller.php`
+
+```text
+1	<?php
+2	
+3	namespace App\Http\Controllers;
+4	
+5	abstract class Controller
+6	{
+7	    //
+8	}
+9
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:02Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Http/Controllers/Controller.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:07Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+find /var/www/jepflow.io/public/myeverything/api/app/Providers -type f 2>&1
+cat /var/www/jepflow.io/public/myeverything/api/bootstrap/providers.php 2>&1
+```
+
+```text
+/var/www/jepflow.io/public/myeverything/api/app/Providers/AppServiceProvider.php
+<?php
+
+use App\Providers\AppServiceProvider;
+
+return [
+    AppServiceProvider::class,
+];
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:10Z)**_
+
+Now the routes.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:10Z)**_
+
+<tool-use data-tool-type="read" data-tool-name="Read"><details>
+<summary>Tool use: **Read**</summary>
+ `./api/routes/api.php`
+
+```text
+1	<?php
+2	
+3	use App\Http\Controllers\Auth\AuthController;
+4	use App\Http\Controllers\Market\MarketController;
+5	use App\Http\Controllers\News\FeedbackController;
+6	use App\Http\Controllers\News\FeedController;
+7	use App\Http\Controllers\News\SourceController;
+8	use Illuminate\Support\Facades\Route;
+9	
+10	Route::post('/register', [AuthController::class, 'register']);
+11	Route::post('/login', [AuthController::class, 'login']);
+12	
+13	Route::middleware('auth:sanctum')->group(function () {
+14	    Route::post('/logout', [AuthController::class, 'logout']);
+15	    Route::get('/user', [AuthController::class, 'me']);
+16	});
+17	
+18	Route::prefix('news')->group(function () {
+19	    Route::get('/sources', [SourceController::class, 'index']);
+20	    Route::get('/feed', [FeedController::class, 'index']);
+21	
+22	    Route::middleware('auth:sanctum')->group(function () {
+23	        Route::post('/sources', [SourceController::class, 'store']);
+24	        Route::delete('/sources/{source}', [SourceController::class, 'destroy']);
+25	        Route::patch('/sources/reorder', [SourceController::class, 'reorder']);
+26	        Route::post('/articles/{article}/feedback', [FeedbackController::class, 'store']);
+27	        Route::delete('/articles/{article}/feedback', [FeedbackController::class, 'destroy']);
+28	    });
+29	});
+30	
+31	Route::get('/market/overview', [MarketController::class, 'overview']);
+32
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:13Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/routes/api.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:17Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/routes/api.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:22Z)**_
+
+Now let's run migrations and fix ownership before testing.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:25Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Fix ownership and run todo migrations
+
+```bash
+chown -R www-data:www-data /var/www/jepflow.io/public/myeverything/api/app /var/www/jepflow.io/public/myeverything/api/database /var/www/jepflow.io/public/myeverything/api/routes
+sudo -u www-data php artisan migrate --force 2>&1
+```
+
+```text
+   INFO  Running migrations.  
+
+  2026_08_18_192505_create_todos_table .......................... 73.61ms DONE
+  2026_08_18_192506_create_todo_completions_table ............... 48.70ms DONE
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:26Z)**_
+
+Now let's test the backend end-to-end before building the frontend.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:41Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Test todo creation across all recurrence types
+
+```bash
+(php artisan serve --port=8000 > /tmp/claude-0/-var-www-jepflow-io-public-myeverything/cb6cd098-e8df-4a9e-9edd-992c56711363/scratchpad/laravel-serve.log 2>&1 &)
+sleep 2
+CJ=/tmp/claude-0/-var-www-jepflow-io-public-myeverything/cb6cd098-e8df-4a9e-9edd-992c56711363/scratchpad/todo-cookies.txt
+rm -f "$CJ"
+O="-H Origin:http://localhost:3000 -H Referer:http://localhost:3000"
+curl -s -i -c "$CJ" -b "$CJ" $O http://127.0.0.1:8000/sanctum/csrf-cookie -o /dev/null -w "csrf: %{http_code}\n"
+XSRF=$(grep XSRF-TOKEN "$CJ" | tail -1 | awk '{print $7}' | python3 -c "import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))")
+
+curl -s -c "$CJ" -b "$CJ" $O -H "Accept: application/json" -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF" \
+  -X POST http://127.0.0.1:8000/api/register \
+  -d '{"name":"Todo Tester","email":"todotest@example.com","password":"password123","password_confirmation":"password123"}' -o /dev/null -w "register: %{http_code}\n"
+
+echo "--- refresh csrf ---"
+curl -s -i -c "$CJ" -b "$CJ" $O http://127.0.0.1:8000/sanctum/csrf-cookie -o /dev/null -w "csrf: %{http_code}\n"
+XSRF=$(grep XSRF-TOKEN "$CJ" | tail -1 | awk '{print $7}' | python3 -c "import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))")
+AUTH="-c $CJ -b $CJ $O -H X-XSRF-TOKEN:$XSRF -H Accept:application/json -H Content-Type:application/json"
+
+echo "--- create a one-off todo (today) ---"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos -d "{\"title\":\"Buy milk\",\"recurrence\":\"once\",\"start_date\":\"$(date +%F)\"}" | python3 -m json.tool
+
+echo "--- create a daily todo starting today ---"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos -d "{\"title\":\"Stretch\",\"recurrence\":\"daily\",\"start_date\":\"$(date +%F)\"}" | python3 -m json.tool
+
+echo "--- create a weekly todo starting today ---"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos -d "{\"title\":\"Water plants\",\"recurrence\":\"weekly\",\"start_date\":\"$(date +%F)\"}" | python3 -m json.tool
+
+echo "--- create a custom every-3-days todo, start date 2 days ago ---"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos -d "{\"title\":\"Take out recycling\",\"recurrence\":\"custom\",\"interval_days\":3,\"start_date\":\"$(date -d '2 days ago' +%F)\"}" | python3 -m json.tool
+
+echo "--- create a one-off due in the future (should NOT be due today) ---"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos -d "{\"title\":\"Dentist appointment\",\"recurrence\":\"once\",\"start_date\":\"$(date -d '5 days' +%F)\"}" | python3 -m json.tool
+```
+
+```text
+csrf: 204
+register: 200
+--- refresh csrf ---
+csrf: 204
+--- create a one-off todo (today) ---
+{
+    "data": {
+        "id": 1,
+        "title": "Buy milk",
+        "description": null,
+        "recurrence": "once",
+        "interval_days": null,
+        "start_date": "2026-08-18",
+        "position": null,
+        "due_today": true,
+        "completed_today": false
+    }
+}
+--- create a daily todo starting today ---
+{
+    "data": {
+        "id": 2,
+        "title": "Stretch",
+        "description": null,
+        "recurrence": "daily",
+        "interval_days": null,
+        "start_date": "2026-08-18",
+        "position": null,
+        "due_today": true,
+        "completed_today": false
+    }
+}
+--- create a weekly todo starting today ---
+{
+    "data": {
+        "id": 3,
+        "title": "Water plants",
+        "description": null,
+        "recurrence": "weekly",
+        "interval_days": null,
+        "start_date": "2026-08-18",
+        "position": null,
+        "due_today": true,
+        "completed_today": false
+    }
+}
+--- create a custom every-3-days todo, start date 2 days ago ---
+{
+    "data": {
+        "id": 4,
+        "title": "Take out recycling",
+        "description": null,
+        "recurrence": "custom",
+        "interval_days": 3,
+        "start_date": "2026-08-16",
+        "position": null,
+        "due_today": false,
+        "completed_today": false
+    }
+}
+--- create a one-off due in the future (should NOT be due today) ---
+{
+    "data": {
+        "id": 5,
+        "title": "Dentist appointment",
+        "description": null,
+        "recurrence": "once",
+        "interval_days": null,
+        "start_date": "2026-08-23",
+        "position": null,
+        "due_today": false,
+        "completed_today": false
+    }
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:53Z)**_
+
+Found the same class of bug as the `is_default` issue earlier — `position` isn't in `Todo`'s fillable list, so it's silently dropped on mass-assignment. Fixing.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:26:54Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Models/Todo.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:06Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Verify position fix and full index listing
+
+```bash
+chown www-data:www-data /var/www/jepflow.io/public/myeverything/api/app/Models/Todo.php
+CJ=/tmp/claude-0/-var-www-jepflow-io-public-myeverything/cb6cd098-e8df-4a9e-9edd-992c56711363/scratchpad/todo-cookies.txt
+O="-H Origin:http://localhost:3000 -H Referer:http://localhost:3000"
+XSRF=$(grep XSRF-TOKEN "$CJ" | tail -1 | awk '{print $7}' | python3 -c "import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))")
+AUTH="-c $CJ -b $CJ $O -H X-XSRF-TOKEN:$XSRF -H Accept:application/json -H Content-Type:application/json"
+
+echo "--- create another todo, verify position now correct ---"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos -d "{\"title\":\"Read a book\",\"recurrence\":\"once\",\"start_date\":\"$(date +%F)\"}" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print('position:', d['position'])"
+
+echo "--- index (should show 6 todos, positions 0-5) ---"
+curl -s $AUTH http://127.0.0.1:8000/api/todos | python3 -c "
+import json,sys
+d = json.load(sys.stdin)['data']
+for t in d:
+    print(t['id'], t['title'], 'pos=', t['position'], 'due_today=', t['due_today'], 'completed=', t['completed_today'])
+"
+```
+
+```text
+--- create another todo, verify position now correct ---
+position: 1
+--- index (should show 6 todos, positions 0-5) ---
+1 Buy milk pos= 0 due_today= True completed= False
+2 Stretch pos= 0 due_today= True completed= False
+3 Water plants pos= 0 due_today= True completed= False
+4 Take out recycling pos= 0 due_today= False completed= False
+5 Dentist appointment pos= 0 due_today= False completed= False
+6 Read a book pos= 1 due_today= True completed= False
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:10Z)**_
+
+That confirms the fix works going forward (the first 5 rows are just leftover from before the fix — will be cleaned up with the rest of the test data). Now testing toggle, update, reorder, delete.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:18Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Test toggle, update, reorder, delete, and unauthorized access
+
+```bash
+CJ=/tmp/claude-0/-var-www-jepflow-io-public-myeverything/cb6cd098-e8df-4a9e-9edd-992c56711363/scratchpad/todo-cookies.txt
+O="-H Origin:http://localhost:3000 -H Referer:http://localhost:3000"
+XSRF=$(grep XSRF-TOKEN "$CJ" | tail -1 | awk '{print $7}' | python3 -c "import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))")
+AUTH="-c $CJ -b $CJ $O -H X-XSRF-TOKEN:$XSRF -H Accept:application/json -H Content-Type:application/json"
+
+echo "--- toggle todo 1 (Buy milk) done ---"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos/1/toggle | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print('completed_today:', d['completed_today'])"
+
+echo "--- toggle again (should un-complete) ---"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos/1/toggle | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print('completed_today:', d['completed_today'])"
+
+echo "--- update todo 2 title ---"
+curl -s $AUTH -X PATCH http://127.0.0.1:8000/api/todos/2 -d '{"title":"Stretch for 10 min","recurrence":"daily","start_date":"2026-08-18"}' | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(d['title'])"
+
+echo "--- reorder: put id 6 first ---"
+curl -s $AUTH -X PATCH http://127.0.0.1:8000/api/todos/reorder -d '{"todo_ids":[6,1,2,3,4,5]}' | python3 -c "
+import json,sys
+d = json.load(sys.stdin)['data']
+for t in d: print(t['id'], t['title'], 'pos=', t['position'])
+"
+
+echo "--- delete todo 5 ---"
+curl -s -o /dev/null -w "%{http_code}\n" $AUTH -X DELETE http://127.0.0.1:8000/api/todos/5
+
+echo "--- try to access another user's todo (should 403/404) ---"
+curl -s -o /dev/null -w "%{http_code}\n" $AUTH -X DELETE http://127.0.0.1:8000/api/todos/999
+```
+
+```text
+--- toggle todo 1 (Buy milk) done ---
+completed_today: True
+--- toggle again (should un-complete) ---
+completed_today: False
+--- update todo 2 title ---
+Stretch for 10 min
+--- reorder: put id 6 first ---
+6 Read a book pos= 0
+1 Buy milk pos= 1
+2 Stretch for 10 min pos= 2
+3 Water plants pos= 3
+4 Take out recycling pos= 4
+5 Dentist appointment pos= 5
+--- delete todo 5 ---
+204
+--- try to access another user's todo (should 403/404) ---
+404
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:22Z)**_
+
+Let's verify cross-user ownership protection with a real second account, and validation rules.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:31Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Test cross-user protection and validation
+
+```bash
+CJ2=/tmp/claude-0/-var-www-jepflow-io-public-myeverything/cb6cd098-e8df-4a9e-9edd-992c56711363/scratchpad/todo-cookies2.txt
+rm -f "$CJ2"
+O="-H Origin:http://localhost:3000 -H Referer:http://localhost:3000"
+curl -s -i -c "$CJ2" -b "$CJ2" $O http://127.0.0.1:8000/sanctum/csrf-cookie -o /dev/null -w "csrf: %{http_code}\n"
+XSRF2=$(grep XSRF-TOKEN "$CJ2" | tail -1 | awk '{print $7}' | python3 -c "import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))")
+curl -s -c "$CJ2" -b "$CJ2" $O -H "Accept: application/json" -H "Content-Type: application/json" -H "X-XSRF-TOKEN: $XSRF2" \
+  -X POST http://127.0.0.1:8000/api/register \
+  -d '{"name":"Todo Tester 2","email":"todotest2@example.com","password":"password123","password_confirmation":"password123"}' -o /dev/null -w "register2: %{http_code}\n"
+
+echo "--- user2 tries to toggle user1's todo (id 1, exists) ---"
+AUTH2="-c $CJ2 -b $CJ2 $O -H X-XSRF-TOKEN:$XSRF2 -H Accept:application/json -H Content-Type:application/json"
+curl -s -o /dev/null -w "%{http_code}\n" $AUTH2 -X POST http://127.0.0.1:8000/api/todos/1/toggle
+
+echo "--- validation: custom recurrence without interval_days ---"
+CJ=/tmp/claude-0/-var-www-jepflow-io-public-myeverything/cb6cd098-e8df-4a9e-9edd-992c56711363/scratchpad/todo-cookies.txt
+XSRF=$(grep XSRF-TOKEN "$CJ" | tail -1 | awk '{print $7}' | python3 -c "import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))")
+AUTH="-c $CJ -b $CJ $O -H X-XSRF-TOKEN:$XSRF -H Accept:application/json -H Content-Type:application/json"
+curl -s $AUTH -X POST http://127.0.0.1:8000/api/todos -d '{"title":"bad","recurrence":"custom","start_date":"2026-08-18"}' | python3 -m json.tool
+```
+
+```text
+csrf: 204
+register2: 200
+--- user2 tries to toggle user1's todo (id 1, exists) ---
+419
+--- validation: custom recurrence without interval_days ---
+{
+    "message": "The interval days field is required when recurrence is custom.",
+    "errors": {
+        "interval_days": [
+            "The interval days field is required when recurrence is custom."
+        ]
+    }
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:34Z)**_
+
+That 419 is the same CSRF-rotation-on-login quirk from before, not the authorization check. Let me refresh the token and retry.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:40Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Retry cross-user ownership test with fresh CSRF token
+
+```bash
+CJ2=/tmp/claude-0/-var-www-jepflow-io-public-myeverything/cb6cd098-e8df-4a9e-9edd-992c56711363/scratchpad/todo-cookies2.txt
+O="-H Origin:http://localhost:3000 -H Referer:http://localhost:3000"
+curl -s -i -c "$CJ2" -b "$CJ2" $O http://127.0.0.1:8000/sanctum/csrf-cookie -o /dev/null -w "csrf: %{http_code}\n"
+XSRF2=$(grep XSRF-TOKEN "$CJ2" | tail -1 | awk '{print $7}' | python3 -c "import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))")
+AUTH2="-c $CJ2 -b $CJ2 $O -H X-XSRF-TOKEN:$XSRF2 -H Accept:application/json -H Content-Type:application/json"
+echo "--- user2 tries to toggle user1's todo (id 1) ---"
+curl -s $AUTH2 -X POST http://127.0.0.1:8000/api/todos/1/toggle -w "\nstatus: %{http_code}\n"
+echo "--- user2's own todo list (should be empty) ---"
+curl -s $AUTH2 http://127.0.0.1:8000/api/todos | python3 -c "import json,sys; print(json.load(sys.stdin)['data'])"
+```
+
+```text
+csrf: 204
+--- user2 tries to toggle user1's todo (id 1) ---
+{
+    "message": "This action is unauthorized."
+}
+status: 403
+--- user2's own todo list (should be empty) ---
+[]
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:42Z)**_
+
+Authorization correctly returns 403, validation errors are clear, and per-user isolation works. Let's clean up test data and move to the frontend.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:45Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Clean up test data (todos/completions cascade-delete with the users)
+
+```bash
+mysql -u root myeverything -e "DELETE FROM users WHERE email IN ('todotest@example.com','todotest2@example.com'); DELETE FROM sessions;" 2>&1
+pkill -9 -f "artisan serve" 2>&1
+echo done
+```
+
+```text
+Exit code 1
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:49Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+mysql -u root myeverything -e "SELECT COUNT(*) as users FROM users; SELECT COUNT(*) as todos FROM todos;" 2>&1
+ps aux | grep "artisan serve" | grep -v grep
+```
+
+```text
+users
+1
+todos
+0
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:27:54Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`mysql -u root myeverything -e "SELECT id, name, email FROM users;" 2>&1`
+
+```text
+id	name	email
+5	John	john.pretsch@protonmail.com
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:00Z)**_
+
+Good — that's the real user's own account (not test data), untouched. Backend is clean and fully verified. Now the frontend.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:01Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```typescript
+export type Recurrence = "once" | "daily" | "weekly" | "custom";
+
+export type Todo = {
+  id: number;
+  title: string;
+  description: string | null;
+  recurrence: Recurrence;
+  interval_days: number | null;
+  start_date: string;
+  position: number;
+  due_today: boolean;
+  completed_today: boolean;
+};
+
+export type TodoInput = {
+  title: string;
+  description?: string | null;
+  recurrence: Recurrence;
+  interval_days?: number | null;
+  start_date: string;
+};
+
+```
+
+```text
+File created successfully at: /var/www/jepflow.io/public/myeverything/web/src/lib/todo-types.ts (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:07Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```typescript
+import { apiFetch } from "./api";
+import type { Todo, TodoInput } from "./todo-types";
+
+export async function getTodos(): Promise<Todo[]> {
+  const res = await apiFetch<{ data: Todo[] }>("/api/todos");
+  return res.data;
+}
+
+export async function createTodo(input: TodoInput): Promise<Todo> {
+  const res = await apiFetch<{ data: Todo }>("/api/todos", {
+    method: "POST",
+    body: input,
+  });
+  return res.data;
+}
+
+export async function updateTodo(
+  id: number,
+  input: TodoInput,
+): Promise<Todo> {
+  const res = await apiFetch<{ data: Todo }>(`/api/todos/${id}`, {
+    method: "PATCH",
+    body: input,
+  });
+  return res.data;
+}
+
+export function deleteTodo(id: number): Promise<void> {
+  return apiFetch<void>(`/api/todos/${id}`, { method: "DELETE" });
+}
+
+export async function toggleTodo(id: number): Promise<Todo> {
+  const res = await apiFetch<{ data: Todo }>(`/api/todos/${id}/toggle`, {
+    method: "POST",
+  });
+  return res.data;
+}
+
+export async function reorderTodos(todoIds: number[]): Promise<Todo[]> {
+  const res = await apiFetch<{ data: Todo[] }>("/api/todos/reorder", {
+    method: "PATCH",
+    body: { todo_ids: todoIds },
+  });
+  return res.data;
+}
+
+```
+
+```text
+File created successfully at: /var/www/jepflow.io/public/myeverything/web/src/lib/todo.ts (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:20Z)**_
+
+<tool-use data-tool-type="read" data-tool-name="Read"><details>
+<summary>Tool use: **Read**</summary>
+ `./web/src/app/(tabs)/todo/page.tsx`
+
+```text
+1	import { RequireAuth } from "@/components/require-auth";
+2	
+3	export default function TodoPage() {
+4	  return (
+5	    <RequireAuth>
+6	      <h1 className="mb-2 text-xl font-semibold">Todo</h1>
+7	      <p className="text-sm text-zinc-500">
+8	        Your personal, user-defined task list. Not wired up yet.
+9	      </p>
+10	    </RequireAuth>
+11	  );
+12	}
+13
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:23Z)**_
+
+Now the form component (shared for create and edit).
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:34Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```tsx
+"use client";
+
+import { useState, type FormEvent } from "react";
+import { ApiError } from "@/lib/api";
+import type { Recurrence, TodoInput } from "@/lib/todo-types";
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function TodoForm({
+  initial,
+  submitLabel,
+  onSubmit,
+  onCancel,
+}: {
+  initial?: TodoInput;
+  submitLabel: string;
+  onSubmit: (input: TodoInput) => Promise<void>;
+  onCancel?: () => void;
+}) {
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [recurrence, setRecurrence] = useState<Recurrence>(
+    initial?.recurrence ?? "once",
+  );
+  const [intervalDays, setIntervalDays] = useState(
+    initial?.interval_days ? String(initial.interval_days) : "3",
+  );
+  const [startDate, setStartDate] = useState(initial?.start_date ?? today());
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        title,
+        description: description || null,
+        recurrence,
+        interval_days: recurrence === "custom" ? Number(intervalDays) : null,
+        start_date: startDate,
+      });
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const message =
+          typeof err.data === "object" && err.data && "message" in err.data
+            ? String((err.data as { message: unknown }).message)
+            : "Couldn't save that todo.";
+        setError(message);
+      } else {
+        setError("Couldn't save that todo.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-3 rounded border border-black/10 p-4 dark:border-white/10"
+    >
+      <input
+        type="text"
+        placeholder="Title"
+        required
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+      />
+      <textarea
+        placeholder="Description (optional)"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        rows={2}
+        className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+      />
+
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            name="recurrence"
+            checked={recurrence === "once"}
+            onChange={() => setRecurrence("once")}
+          />
+          One-off
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            name="recurrence"
+            checked={recurrence === "daily"}
+            onChange={() => setRecurrence("daily")}
+          />
+          Daily
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            name="recurrence"
+            checked={recurrence === "weekly"}
+            onChange={() => setRecurrence("weekly")}
+          />
+          Weekly
+        </label>
+        <label className="flex items-center gap-1">
+          <input
+            type="radio"
+            name="recurrence"
+            checked={recurrence === "custom"}
+            onChange={() => setRecurrence("custom")}
+          />
+          Every
+          <input
+            type="number"
+            min={2}
+            max={365}
+            value={intervalDays}
+            onChange={(e) => {
+              setIntervalDays(e.target.value);
+              setRecurrence("custom");
+            }}
+            className="w-14 rounded border border-black/10 px-1 py-0.5 dark:border-white/10"
+          />
+          days
+        </label>
+      </div>
+
+      <label className="flex items-center gap-2 text-sm text-zinc-500">
+        {recurrence === "once" ? "Due" : "Starting"}
+        <input
+          type="date"
+          required
+          value={startDate}
+          onChange={(e) => setStartDate(e.target.value)}
+          className="rounded border border-black/10 px-2 py-1 text-foreground dark:border-white/10"
+        />
+      </label>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="self-start rounded bg-foreground px-3 py-1 text-sm font-medium text-background disabled:opacity-50"
+        >
+          {submitLabel}
+        </button>
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="self-start rounded border border-black/10 px-3 py-1 text-sm dark:border-white/10"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+```
+
+```text
+File created successfully at: /var/www/jepflow.io/public/myeverything/web/src/components/todo/todo-form.tsx (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:36Z)**_
+
+Now the item row component.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:44Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```tsx
+"use client";
+
+import { useState } from "react";
+import type { Todo, TodoInput } from "@/lib/todo-types";
+import { TodoForm } from "./todo-form";
+
+function describeRecurrence(todo: Todo): string {
+  switch (todo.recurrence) {
+    case "once":
+      return `Once, on ${todo.start_date}`;
+    case "daily":
+      return "Daily";
+    case "weekly":
+      return "Weekly";
+    case "custom":
+      return `Every ${todo.interval_days} days`;
+  }
+}
+
+export function TodoItem({
+  todo,
+  showCheckbox,
+  onToggle,
+  onUpdate,
+  onDelete,
+  onMove,
+  isFirst,
+  isLast,
+}: {
+  todo: Todo;
+  showCheckbox: boolean;
+  onToggle: (id: number) => void;
+  onUpdate: (id: number, input: TodoInput) => Promise<void>;
+  onDelete: (id: number) => void;
+  onMove?: (id: number, delta: 1 | -1) => void;
+  isFirst?: boolean;
+  isLast?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <li>
+        <TodoForm
+          submitLabel="Save"
+          initial={{
+            title: todo.title,
+            description: todo.description,
+            recurrence: todo.recurrence,
+            interval_days: todo.interval_days,
+            start_date: todo.start_date,
+          }}
+          onSubmit={async (input) => {
+            await onUpdate(todo.id, input);
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      </li>
+    );
+  }
+
+  return (
+    <li className="flex items-start justify-between gap-3 rounded border border-black/10 p-3 text-sm dark:border-white/10">
+      <div className="flex items-start gap-2">
+        {showCheckbox && (
+          <input
+            type="checkbox"
+            checked={todo.completed_today}
+            onChange={() => onToggle(todo.id)}
+            className="mt-1"
+          />
+        )}
+        <div>
+          <p
+            className={
+              todo.completed_today
+                ? "text-zinc-400 line-through"
+                : "text-foreground"
+            }
+          >
+            {todo.title}
+          </p>
+          {todo.description && (
+            <p className="text-xs text-zinc-500">{todo.description}</p>
+          )}
+          <p className="text-xs text-zinc-400">{describeRecurrence(todo)}</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-1 text-xs text-zinc-500">
+        {onMove && (
+          <>
+            <button
+              type="button"
+              aria-label="Move up"
+              disabled={isFirst}
+              onClick={() => onMove(todo.id, -1)}
+              className="hover:text-foreground disabled:opacity-30"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              aria-label="Move down"
+              disabled={isLast}
+              onClick={() => onMove(todo.id, 1)}
+              className="hover:text-foreground disabled:opacity-30"
+            >
+              ↓
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="hover:text-foreground"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(todo.id)}
+          className="hover:text-red-600"
+        >
+          Delete
+        </button>
+      </div>
+    </li>
+  );
+}
+
+```
+
+```text
+File created successfully at: /var/www/jepflow.io/public/myeverything/web/src/components/todo/todo-item.tsx (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:46Z)**_
+
+Now the orchestrator.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:28:56Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```tsx
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  createTodo,
+  deleteTodo,
+  getTodos,
+  reorderTodos,
+  toggleTodo,
+  updateTodo,
+} from "@/lib/todo";
+import type { Todo, TodoInput } from "@/lib/todo-types";
+import { TodoForm } from "./todo-form";
+import { TodoItem } from "./todo-item";
+
+export function TodoList() {
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [requestId, setRequestId] = useState(0);
+  const [resolvedId, setResolvedId] = useState(-1);
+  const loading = requestId !== resolvedId;
+
+  useEffect(() => {
+    let ignore = false;
+
+    getTodos()
+      .then((data) => {
+        if (ignore) return;
+        setTodos(data);
+        setError(null);
+      })
+      .catch(() => {
+        if (!ignore) setError("Couldn't load your todos.");
+      })
+      .finally(() => {
+        if (!ignore) setResolvedId(requestId);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [requestId]);
+
+  function reload() {
+    setRequestId((n) => n + 1);
+  }
+
+  async function handleCreate(input: TodoInput) {
+    await createTodo(input);
+    setShowForm(false);
+    reload();
+  }
+
+  async function handleUpdate(id: number, input: TodoInput) {
+    await updateTodo(id, input);
+    reload();
+  }
+
+  async function handleDelete(id: number) {
+    await deleteTodo(id);
+    reload();
+  }
+
+  async function handleToggle(id: number) {
+    await toggleTodo(id);
+    reload();
+  }
+
+  async function handleMove(id: number, delta: 1 | -1) {
+    const index = todos.findIndex((t) => t.id === id);
+    const target = index + delta;
+    if (index === -1 || target < 0 || target >= todos.length) return;
+
+    const next = [...todos];
+    [next[index], next[target]] = [next[target], next[index]];
+    setTodos(next);
+    await reorderTodos(next.map((t) => t.id));
+  }
+
+  const dueToday = todos.filter((t) => t.due_today);
+  const notDueToday = todos.filter((t) => !t.due_today);
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Todo</h1>
+        <button
+          type="button"
+          onClick={() => setShowForm((v) => !v)}
+          className="rounded border border-black/10 px-2 py-1 text-xs font-medium dark:border-white/10"
+        >
+          {showForm ? "Close" : "Add todo"}
+        </button>
+      </div>
+
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+
+      {showForm && (
+        <div className="mb-4">
+          <TodoForm submitLabel="Add" onSubmit={handleCreate} />
+        </div>
+      )}
+
+      {loading && todos.length === 0 ? (
+        <p className="text-sm text-zinc-500">Loading...</p>
+      ) : (
+        <div className="flex flex-col gap-6">
+          <div>
+            <p className="mb-2 text-sm font-medium">Today</p>
+            {dueToday.length === 0 ? (
+              <p className="text-sm text-zinc-500">Nothing due today.</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {dueToday.map((todo) => (
+                  <TodoItem
+                    key={todo.id}
+                    todo={todo}
+                    showCheckbox
+                    onToggle={handleToggle}
+                    onUpdate={handleUpdate}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {notDueToday.length > 0 && (
+            <div>
+              <p className="mb-2 text-sm font-medium">
+                Other todos
+              </p>
+              <ul className="flex flex-col gap-2">
+                {notDueToday.map((todo) => (
+                  <TodoItem
+                    key={todo.id}
+                    todo={todo}
+                    showCheckbox={false}
+                    onToggle={handleToggle}
+                    onUpdate={handleUpdate}
+                    onDelete={handleDelete}
+                    onMove={handleMove}
+                    isFirst={todos[0]?.id === todo.id}
+                    isLast={todos[todos.length - 1]?.id === todo.id}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+```
+
+```text
+File created successfully at: /var/www/jepflow.io/public/myeverything/web/src/components/todo/todo-list.tsx (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:07Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/web/src/components/todo/todo-list.tsx has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:22Z)**_
+
+<tool-use data-tool-type="read" data-tool-name="Read"><details>
+<summary>Tool use: **Read**</summary>
+ `./web/src/components/todo/todo-list.tsx`
+
+```text
+70	  async function handleMove(id: number, delta: 1 | -1) {
+71	    const index = todos.findIndex((t) => t.id === id);
+72	    const target = index + delta;
+73	    if (index === -1 || target < 0 || target >= todos.length) return;
+74	
+75	    const next = [...todos];
+76	    [next[index], next[target]] = [next[target], next[index]];
+77	    setTodos(next);
+78	    await reorderTodos(next.map((t) => t.id));
+79	  }
+80	
+81	  const dueToday = todos.filter((t) => t.due_today);
+82	  const notDueToday = todos.filter((t) => !t.due_today);
+83	
+84	  return (
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:28Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/web/src/components/todo/todo-list.tsx has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:30Z)**_
+
+Now the page wiring.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:31Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```tsx
+import { RequireAuth } from "@/components/require-auth";
+import { TodoList } from "@/components/todo/todo-list";
+
+export default function TodoPage() {
+  return (
+    <RequireAuth>
+      <TodoList />
+    </RequireAuth>
+  );
+}
+
+```
+
+```text
+The file /var/www/jepflow.io/public/myeverything/web/src/app/(tabs)/todo/page.tsx has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:33Z)**_
+
+Now typecheck, lint, and build.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:37Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Typecheck
+
+`cd /var/www/jepflow.io/public/myeverything/web && npx tsc --noEmit 2>&1 | head -60`
+
+```text
+(Bash completed with no output)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:45Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Lint
+
+`npm run lint 2>&1 | tail -60`
+
+```text
+> web@0.1.0 lint
+> eslint
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:47Z)**_
+
+Clean. Now build and deploy.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:29:55Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Production build
+
+`npm run build 2>&1 | tail -30`
+
+```text
+▲ Next.js 16.3.1 (Turbopack)
+- Environments: .env.production.local, .env.local
+✓ Running next.config.ts took 24ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 1345ms
+  Running TypeScript ...
+  Finished TypeScript in 2.5s ...
+  Collecting page data using 1 worker ...
+  Generating static pages using 1 worker (0/10) ...
+  Generating static pages using 1 worker (2/10) 
+  Generating static pages using 1 worker (4/10) 
+  Generating static pages using 1 worker (7/10) 
+✓ Generating static pages using 1 worker (10/10) in 272ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /gig-leads
+├ ○ /login
+├ ○ /market
+├ ○ /news
+├ ○ /todo
+└ ○ /weather
+
+
+○  (Static)  prerendered as static content
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:03Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Fix ownership and restart production Next.js service
+
+```bash
+chown -R www-data:www-data /var/www/jepflow.io/public/myeverything
+systemctl restart myeverything-web.service
+sleep 3
+systemctl status myeverything-web.service --no-pager 2>&1 | head -8
+ps aux | grep "artisan serve" | grep -v grep
+```
+
+```text
+● myeverything-web.service - myeverything.jepflow.io Next.js app
+     Loaded: loaded (/etc/systemd/system/myeverything-web.service; enabled; preset: enabled)
+     Active: active (running) since Tue 2026-08-18 19:30:00 UTC; 3s ago
+   Main PID: 406603 (npm run start -)
+      Tasks: 25 (limit: 9483)
+     Memory: 64.6M (peak: 64.8M)
+        CPU: 591ms
+     CGroup: /system.slice/myeverything-web.service
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:05Z)**_
+
+No stray dev server left running. Let's verify the live production endpoint and page.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:08Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Verify todo page and API are live
+
+```bash
+curl -s -o /dev/null -w "todo page: %{http_code}\n" https://myeverything.jepflow.io/todo
+curl -s -o /dev/null -w "todos api (no auth, should 401): %{http_code}\n" https://myeverything.jepflow.io/api/todos
+```
+
+```text
+todo page: 200
+todos api (no auth, should 401): 500
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:11Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`tail -50 /var/www/jepflow.io/public/myeverything/api/storage/logs/laravel.log 2>&1`
+
+```text
+[2026-08-18 19:30:08] production.ERROR: Route [login] not defined. {"exception":"[object] (Symfony\\Component\\Routing\\Exception\\RouteNotFoundException(code: 0): Route [login] not defined. at /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Routing/UrlGenerator.php:542)
+[stacktrace]
+#0 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/helpers.php(870): Illuminate\\Routing\\UrlGenerator->route()
+#1 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Configuration/ApplicationBuilder.php(291): route()
+#2 [internal function]: Illuminate\\Foundation\\Configuration\\ApplicationBuilder->{closure:{closure:Illuminate\\Foundation\\Configuration\\ApplicationBuilder::withMiddleware():289}:291}()
+#3 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Auth/Middleware/Authenticate.php(117): call_user_func()
+#4 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Auth/Middleware/Authenticate.php(104): Illuminate\\Auth\\Middleware\\Authenticate->redirectTo()
+#5 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Auth/Middleware/Authenticate.php(87): Illuminate\\Auth\\Middleware\\Authenticate->unauthenticated()
+#6 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Auth/Middleware/Authenticate.php(61): Illuminate\\Auth\\Middleware\\Authenticate->authenticate()
+#7 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Auth\\Middleware\\Authenticate->handle()
+#8 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/sanctum/src/Http/Middleware/EnsureFrontendRequestsAreStateful.php(26): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#9 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(180): Laravel\\Sanctum\\Http\\Middleware\\EnsureFrontendRequestsAreStateful->{closure:Laravel\\Sanctum\\Http\\Middleware\\EnsureFrontendRequestsAreStateful::handle():25}()
+#10 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(137): Illuminate\\Pipeline\\Pipeline->{closure:Illuminate\\Pipeline\\Pipeline::prepareDestination():178}()
+#11 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/sanctum/src/Http/Middleware/EnsureFrontendRequestsAreStateful.php(25): Illuminate\\Pipeline\\Pipeline->then()
+#12 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Laravel\\Sanctum\\Http\\Middleware\\EnsureFrontendRequestsAreStateful->handle()
+#13 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(137): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#14 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Routing/Router.php(821): Illuminate\\Pipeline\\Pipeline->then()
+#15 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Routing/Router.php(800): Illuminate\\Routing\\Router->runRouteWithinStack()
+#16 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Routing/Router.php(764): Illuminate\\Routing\\Router->runRoute()
+#17 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Routing/Router.php(753): Illuminate\\Routing\\Router->dispatchToRoute()
+#18 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Kernel.php(200): Illuminate\\Routing\\Router->dispatch()
+#19 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(180): Illuminate\\Foundation\\Http\\Kernel->{closure:Illuminate\\Foundation\\Http\\Kernel::dispatchToRouter():197}()
+#20 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Middleware/TransformsRequest.php(21): Illuminate\\Pipeline\\Pipeline->{closure:Illuminate\\Pipeline\\Pipeline::prepareDestination():178}()
+#21 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Middleware/ConvertEmptyStringsToNull.php(31): Illuminate\\Foundation\\Http\\Middleware\\TransformsRequest->handle()
+#22 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Foundation\\Http\\Middleware\\ConvertEmptyStringsToNull->handle()
+#23 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Middleware/TransformsRequest.php(21): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#24 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Middleware/TrimStrings.php(51): Illuminate\\Foundation\\Http\\Middleware\\TransformsRequest->handle()
+#25 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Foundation\\Http\\Middleware\\TrimStrings->handle()
+#26 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Http/Middleware/ValidatePostSize.php(27): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#27 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Http\\Middleware\\ValidatePostSize->handle()
+#28 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Middleware/PreventRequestsDuringMaintenance.php(110): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#29 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Foundation\\Http\\Middleware\\PreventRequestsDuringMaintenance->handle()
+#30 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Http/Middleware/HandleCors.php(74): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#31 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Http\\Middleware\\HandleCors->handle()
+#32 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Http/Middleware/TrustProxies.php(58): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#33 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Http\\Middleware\\TrustProxies->handle()
+#34 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Middleware/InvokeDeferredCallbacks.php(22): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#35 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Foundation\\Http\\Middleware\\InvokeDeferredCallbacks->handle()
+#36 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Http/Middleware/ValidatePathEncoding.php(28): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#37 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(219): Illuminate\\Http\\Middleware\\ValidatePathEncoding->handle()
+#38 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Pipeline/Pipeline.php(137): Illuminate\\Pipeline\\Pipeline->{closure:{closure:Illuminate\\Pipeline\\Pipeline::carry():194}:195}()
+#39 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Kernel.php(175): Illuminate\\Pipeline\\Pipeline->then()
+#40 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Http/Kernel.php(144): Illuminate\\Foundation\\Http\\Kernel->sendRequestThroughRouter()
+#41 /var/www/jepflow.io/public/myeverything/api/vendor/laravel/framework/src/Illuminate/Foundation/Application.php(1227): Illuminate\\Foundation\\Http\\Kernel->handle()
+#42 /var/www/jepflow.io/public/myeverything/api/public/index.php(20): Illuminate\\Foundation\\Application->handleRequest()
+#43 {main}
+"}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:32Z)**_
+
+Real bug, not just a test artifact — Laravel's default `Authenticate` middleware tries to redirect unauthenticated requests to a named `login` route when the request doesn't explicitly send `Accept: application/json`. Since this is a pure API app with no such route, that throws an uncaught `RouteNotFoundException` → 500 instead of a clean 401. Any client that doesn't set that header exactly right would hit this. Fixing it properly.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:32Z)**_
+
+<tool-use data-tool-type="read" data-tool-name="Read"><details>
+<summary>Tool use: **Read**</summary>
+ `./api/app/Providers/AppServiceProvider.php`
+
+```text
+1	<?php
+2	
+3	namespace App\Providers;
+4	
+5	use Illuminate\Support\ServiceProvider;
+6	
+7	class AppServiceProvider extends ServiceProvider
+8	{
+9	    /**
+10	     * Register any application services.
+11	     */
+12	    public function register(): void
+13	    {
+14	        //
+15	    }
+16	
+17	    /**
+18	     * Bootstrap any application services.
+19	     */
+20	    public function boot(): void
+21	    {
+22	        //
+23	    }
+24	}
+25
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:35Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Providers/AppServiceProvider.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:40Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Edit"><details>
+<summary>Tool use: **Edit**</summary>
+
+```text
+The file /var/www/jepflow.io/public/myeverything/api/app/Providers/AppServiceProvider.php has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:43Z)**_
+
+Now let's fix ownership, restart Laravel-affecting caches (none needed here since no config caching), and verify the fix locally before redeploying.
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:50Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Verify the 401 fix locally before redeploying
+
+```bash
+chown www-data:www-data /var/www/jepflow.io/public/myeverything/api/app/Providers/AppServiceProvider.php
+cd /var/www/jepflow.io/public/myeverything/api && (php artisan serve --port=8000 > /tmp/claude-0/-var-www-jepflow-io-public-myeverything/cb6cd098-e8df-4a9e-9edd-992c56711363/scratchpad/laravel-serve.log 2>&1 &)
+sleep 2
+echo "--- unauthenticated /api/todos, no Accept header (the bug case) ---"
+curl -s -i http://127.0.0.1:8000/api/todos | head -5
+echo "--- unauthenticated /api/todos, with Accept header ---"
+curl -s -i -H "Accept: application/json" http://127.0.0.1:8000/api/todos | head -5
+```
+
+```text
+--- unauthenticated /api/todos, no Accept header (the bug case) ---
+HTTP/1.1 401 Unauthorized
+Host: 127.0.0.1:8000
+Connection: close
+X-Powered-By: PHP/8.4.23
+Cache-Control: no-cache, private
+--- unauthenticated /api/todos, with Accept header ---
+HTTP/1.1 401 Unauthorized
+Host: 127.0.0.1:8000
+Connection: close
+X-Powered-By: PHP/8.4.23
+Cache-Control: no-cache, private
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:52Z)**_
+
+Fixed — both cases now correctly return 401. Let's kill the local dev server and confirm this fix on production too (no build step needed for a PHP change, just ownership + verify).
+
+_**Agent (claude-sonnet-5 2026-08-18 19:30:56Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+Kill dev server and verify the fix on live production (PHP change is live already, no rebuild needed)
+
+```bash
+pkill -9 -f "artisan serve" 2>&1
+sleep 1
+curl -s -o /dev/null -w "prod /api/todos no accept header: %{http_code}\n" https://myeverything.jepflow.io/api/todos
+curl -s -o /dev/null -w "prod /api/todos with accept header: %{http_code}\n" -H "Accept: application/json" https://myeverything.jepflow.io/api/todos
+```
+
+```text
+Exit code 1
+```
+</details></tool-use>
