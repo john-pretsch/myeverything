@@ -16,6 +16,7 @@ class GigLeadResource extends JsonResource
             'job_type' => $this->job_type,
             'origin' => $this->origin,
             'status' => $this->status,
+            'completion_status' => $this->completion_status,
             'title' => $this->title,
             'company' => $this->company,
             'description' => $this->description,

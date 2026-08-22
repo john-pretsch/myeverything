@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
   status: number;
@@ -33,9 +33,11 @@ export async function apiFetch<T>(
     await ensureCsrfCookie();
   }
 
+  const isFormData = options.body instanceof FormData;
+
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
-  if (options.body !== undefined) {
+  if (options.body !== undefined && !isFormData) {
     headers.set("Content-Type", "application/json");
   }
   const xsrfToken = readCookie("XSRF-TOKEN");
@@ -48,7 +50,11 @@ export async function apiFetch<T>(
     method,
     headers,
     credentials: "include",
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: isFormData
+      ? (options.body as FormData)
+      : options.body !== undefined
+        ? JSON.stringify(options.body)
+        : undefined,
   });
 
   if (!res.ok) {

@@ -10,6 +10,8 @@ export type GigLeadOrigin = "linkedin" | "arc" | "indeed" | "gunio" | "other";
 
 export type GigLeadStatus = "new" | "reviewed" | "dismissed";
 
+export type GigLeadCompletionStatus = "started" | "complete" | "applied";
+
 export type GigLead = {
   id: number;
   url: string;
@@ -17,6 +19,7 @@ export type GigLead = {
   job_type: GigLeadJobType;
   origin: GigLeadOrigin;
   status: GigLeadStatus;
+  completion_status: GigLeadCompletionStatus;
   title: string | null;
   company: string | null;
   description: string | null;

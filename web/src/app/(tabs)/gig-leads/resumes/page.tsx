@@ -1,12 +1,12 @@
-import { GigLeadList } from "@/components/gig-leads/gig-lead-list";
 import { GigLeadsSubNav } from "@/components/gig-leads/gig-leads-subnav";
+import { ResumesSection } from "@/components/gig-leads/resumes-section";
 import { RequireAuth } from "@/components/require-auth";
 
-export default function GigLeadsPage() {
+export default function GigLeadsResumesPage() {
   return (
     <RequireAuth>
       <GigLeadsSubNav />
-      <GigLeadList />
+      <ResumesSection />
     </RequireAuth>
   );
 }

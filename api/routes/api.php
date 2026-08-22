@@ -9,6 +9,8 @@ use App\Http\Controllers\Market\MarketController;
 use App\Http\Controllers\News\FeedbackController;
 use App\Http\Controllers\News\FeedController;
 use App\Http\Controllers\News\SourceController;
+use App\Http\Controllers\ResumeController;
+use App\Http\Controllers\ResumeTailoringController;
 use App\Http\Controllers\TodoController;
 use Illuminate\Support\Facades\Route;
 
@@ -65,5 +67,20 @@ Route::middleware('auth:sanctum')->prefix('gig-leads')->group(function () {
     Route::post('/', [GigLeadController::class, 'store']);
     Route::patch('/{gigLead}', [GigLeadController::class, 'update']);
     Route::post('/{gigLead}/fetch-details', [GigLeadController::class, 'fetchDetails']);
+    Route::post('/{gigLead}/tailor-resume', [ResumeTailoringController::class, 'preview']);
+    Route::post('/{gigLead}/tailor-resume/accept', [ResumeTailoringController::class, 'accept']);
     Route::delete('/{gigLead}', [GigLeadController::class, 'destroy']);
 });
+
+Route::middleware('auth:sanctum')->prefix('resumes')->group(function () {
+    Route::get('/', [ResumeController::class, 'index']);
+    Route::post('/', [ResumeController::class, 'store']);
+    Route::get('/{resume}/download', [ResumeController::class, 'download']);
+    Route::delete('/{resume}', [ResumeController::class, 'destroy']);
+});
+
+// Reached via a signed URL (issued only inside the authenticated
+// ResumeResource response), not auth:sanctum — see ResumeController::viewSigned.
+Route::get('/resumes/{resume}/view-signed', [ResumeController::class, 'viewSigned'])
+    ->middleware('signed')
+    ->name('resumes.view-signed');

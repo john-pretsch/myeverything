@@ -78,7 +78,7 @@ export function GigLeadForm({
           <select
             value={country}
             onChange={(e) => setCountry(e.target.value as GigLeadCountry)}
-            className="rounded border border-black/10 px-2 py-1 dark:border-white/10"
+            className="rounded border border-black/10 bg-background px-2 py-1 text-foreground dark:border-white/10"
           >
             <option value="usa">USA</option>
             <option value="canada">Canada</option>
@@ -90,7 +90,7 @@ export function GigLeadForm({
           <select
             value={jobType}
             onChange={(e) => setJobType(e.target.value as GigLeadJobType)}
-            className="rounded border border-black/10 px-2 py-1 dark:border-white/10"
+            className="rounded border border-black/10 bg-background px-2 py-1 text-foreground dark:border-white/10"
           >
             <option value="full_time">Full time</option>
             <option value="part_time">Part time</option>
@@ -104,7 +104,7 @@ export function GigLeadForm({
           <select
             value={origin}
             onChange={(e) => setOrigin(e.target.value as GigLeadOrigin)}
-            className="rounded border border-black/10 px-2 py-1 dark:border-white/10"
+            className="rounded border border-black/10 bg-background px-2 py-1 text-foreground dark:border-white/10"
           >
             <option value="linkedin">LinkedIn</option>
             <option value="arc">Arc</option>

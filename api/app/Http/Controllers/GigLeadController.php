@@ -40,6 +40,7 @@ class GigLeadController extends Controller
         $lead = $request->user()->gigLeads()->create([
             ...$validated,
             'status' => 'new',
+            'completion_status' => 'started',
         ]);
 
         return new GigLeadResource($lead);
@@ -51,6 +52,7 @@ class GigLeadController extends Controller
 
         $validated = $request->validate([
             'status' => ['sometimes', Rule::in(['new', 'reviewed', 'dismissed'])],
+            'completion_status' => ['sometimes', Rule::in(['started', 'complete', 'applied'])],
             'title' => ['sometimes', 'nullable', 'string', 'max:255'],
             'company' => ['sometimes', 'nullable', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string', 'max:5000'],

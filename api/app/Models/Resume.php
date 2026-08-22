@@ -6,12 +6,20 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['url', 'country', 'job_type', 'origin', 'status', 'completion_status', 'title', 'company', 'description', 'organization_id'])]
-class GigLead extends Model
+#[Fillable([
+    'original_filename',
+    'mime_type',
+    'size',
+    'path',
+    'content',
+    'organization_id',
+    'gig_lead_id',
+    'source_resume_id',
+])]
+class Resume extends Model
 {
-    /** @use HasFactory<\Database\Factories\GigLeadFactory> */
+    /** @use HasFactory<\Database\Factories\ResumeFactory> */
     use HasFactory;
 
     public function user(): BelongsTo
@@ -24,8 +32,13 @@ class GigLead extends Model
         return $this->belongsTo(Organization::class);
     }
 
-    public function resumes(): HasMany
+    public function gigLead(): BelongsTo
     {
-        return $this->hasMany(Resume::class);
+        return $this->belongsTo(GigLead::class);
+    }
+
+    public function sourceResume(): BelongsTo
+    {
+        return $this->belongsTo(Resume::class, 'source_resume_id');
     }
 }

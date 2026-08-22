@@ -8,10 +8,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['url', 'country', 'job_type', 'origin', 'status', 'completion_status', 'title', 'company', 'description', 'organization_id'])]
-class GigLead extends Model
+#[Fillable(['name'])]
+class Organization extends Model
 {
-    /** @use HasFactory<\Database\Factories\GigLeadFactory> */
+    /** @use HasFactory<\Database\Factories\OrganizationFactory> */
     use HasFactory;
 
     public function user(): BelongsTo
@@ -19,9 +19,9 @@ class GigLead extends Model
         return $this->belongsTo(User::class);
     }
 
-    public function organization(): BelongsTo
+    public function gigLeads(): HasMany
     {
-        return $this->belongsTo(Organization::class);
+        return $this->hasMany(GigLead::class);
     }
 
     public function resumes(): HasMany

@@ -4,11 +4,13 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api";
 import type {
   GigLead,
+  GigLeadCompletionStatus,
   GigLeadDetailsInput,
   GigLeadJobType,
   GigLeadOrigin,
   GigLeadStatus,
 } from "@/lib/gig-lead-types";
+import type { Resume } from "@/lib/resume-types";
 
 const JOB_TYPE_LABELS: Record<GigLeadJobType, string> = {
   full_time: "Full time",
@@ -25,24 +27,54 @@ const ORIGIN_LABELS: Record<GigLeadOrigin, string> = {
   other: "Other",
 };
 
+const COMPLETION_STATUS_LABELS: Record<GigLeadCompletionStatus, string> = {
+  started: "Started",
+  complete: "Complete",
+  applied: "Applied",
+};
+
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError &&
+    typeof err.data === "object" &&
+    err.data &&
+    "message" in err.data
+    ? String((err.data as { message: unknown }).message)
+    : fallback;
+}
+
 export function GigLeadItem({
   lead,
   selected,
   fetchingDetails,
   detailsError,
+  resumes,
   onSelect,
   onSetStatus,
+  onSetCompletionStatus,
   onDelete,
   onSaveDetails,
+  onTailorResume,
+  onAcceptTailoredResume,
 }: {
   lead: GigLead;
   selected: boolean;
   fetchingDetails: boolean;
   detailsError: string | null;
+  resumes: Resume[];
   onSelect: (id: number) => void;
   onSetStatus: (id: number, status: GigLeadStatus) => void;
+  onSetCompletionStatus: (
+    id: number,
+    completionStatus: GigLeadCompletionStatus,
+  ) => Promise<void>;
   onDelete: (id: number) => void;
   onSaveDetails: (id: number, input: GigLeadDetailsInput) => Promise<void>;
+  onTailorResume: (gigLeadId: number, resumeId: number) => Promise<string>;
+  onAcceptTailoredResume: (
+    gigLeadId: number,
+    resumeId: number,
+    content: string,
+  ) => Promise<void>;
 }) {
   const addedAt = new Date(lead.added_at).toLocaleString();
   const heading = lead.title || lead.url;
@@ -63,6 +95,17 @@ export function GigLeadItem({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const tailorableResumes = resumes.filter((r) => r.content);
+  const [selectedResumeId, setSelectedResumeId] = useState<number | null>(
+    null,
+  );
+  const [tailoring, setTailoring] = useState(false);
+  const [tailorError, setTailorError] = useState<string | null>(null);
+  const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [accepting, setAccepting] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [accepted, setAccepted] = useState(false);
+
   useEffect(() => {
     if (selected) {
       setFormTitle(lead.title ?? "");
@@ -75,6 +118,13 @@ export function GigLeadItem({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, lead.description]);
 
+  useEffect(() => {
+    if (selected && selectedResumeId === null && tailorableResumes.length > 0) {
+      setSelectedResumeId(tailorableResumes[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, tailorableResumes.length]);
+
   async function handleSave(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -86,17 +136,48 @@ export function GigLeadItem({
         description: formDescription.trim(),
       });
     } catch (err) {
-      const message =
-        err instanceof ApiError &&
-        typeof err.data === "object" &&
-        err.data &&
-        "message" in err.data
-          ? String((err.data as { message: unknown }).message)
-          : "Couldn't save those details.";
-      setSaveError(message);
+      setSaveError(errorMessage(err, "Couldn't save those details."));
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleTailor() {
+    if (!selectedResumeId) return;
+
+    setTailoring(true);
+    setTailorError(null);
+    setAcceptError(null);
+    setAccepted(false);
+    try {
+      const content = await onTailorResume(lead.id, selectedResumeId);
+      setPreviewContent(content);
+    } catch (err) {
+      setTailorError(errorMessage(err, "Couldn't customize that resume."));
+    } finally {
+      setTailoring(false);
+    }
+  }
+
+  async function handleAccept() {
+    if (!selectedResumeId || previewContent === null) return;
+
+    setAccepting(true);
+    setAcceptError(null);
+    try {
+      await onAcceptTailoredResume(lead.id, selectedResumeId, previewContent);
+      setPreviewContent(null);
+      setAccepted(true);
+    } catch (err) {
+      setAcceptError(errorMessage(err, "Couldn't save the tailored resume."));
+    } finally {
+      setAccepting(false);
+    }
+  }
+
+  function handleDiscard() {
+    setPreviewContent(null);
+    setTailorError(null);
   }
 
   return (
@@ -113,13 +194,33 @@ export function GigLeadItem({
           aria-expanded={selected}
         >
           <p className="truncate font-medium hover:underline">{heading}</p>
-          <p className="truncate text-xs text-zinc-500">{subline}</p>
+          <p className="truncate text-xs text-zinc-500">
+            {subline}
+            {subline && " · "}
+            {COMPLETION_STATUS_LABELS[lead.completion_status]}
+          </p>
           {lead.title && (
             <p className="truncate text-xs text-zinc-400">{lead.url}</p>
           )}
           <p className="text-xs text-zinc-400">Added {addedAt}</p>
         </button>
         <div className="flex shrink-0 items-center gap-1 text-xs text-zinc-500">
+          <select
+            value={lead.completion_status}
+            onChange={(e) =>
+              onSetCompletionStatus(
+                lead.id,
+                e.target.value as GigLeadCompletionStatus,
+              )
+            }
+            className="rounded border border-black/10 bg-background px-1 py-0.5 text-foreground dark:border-white/10"
+          >
+            {Object.entries(COMPLETION_STATUS_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={() => onSelect(lead.id)}
@@ -220,6 +321,85 @@ export function GigLeadItem({
                 {saving ? "Saving..." : "Save details"}
               </button>
             </form>
+          )}
+
+          {lead.description && (
+            <div className="mt-3 border-t border-black/10 pt-3 dark:border-white/10">
+              <p className="mb-2 text-xs font-medium">
+                Tailor a resume for this job
+              </p>
+
+              {tailorableResumes.length === 0 ? (
+                <p className="text-xs text-zinc-500">
+                  Upload a resume with parsed text (Account page) to enable
+                  this.
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={selectedResumeId ?? ""}
+                    onChange={(e) => setSelectedResumeId(Number(e.target.value))}
+                    className="rounded border border-black/10 bg-background px-2 py-1 text-xs text-foreground dark:border-white/10"
+                  >
+                    {tailorableResumes.map((resume) => (
+                      <option key={resume.id} value={resume.id}>
+                        {resume.filename}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleTailor}
+                    disabled={tailoring || !selectedResumeId}
+                    className="rounded bg-foreground px-3 py-1 text-xs font-medium text-background disabled:opacity-50"
+                  >
+                    {tailoring ? "Customizing..." : "Customize with ChatGPT"}
+                  </button>
+                </div>
+              )}
+
+              {tailorError && (
+                <p className="mt-2 text-xs text-red-600">{tailorError}</p>
+              )}
+
+              {accepted && (
+                <p className="mt-2 text-xs text-green-600">
+                  Saved as a new resume.
+                </p>
+              )}
+
+              {previewContent !== null && (
+                <div className="mt-2 rounded border border-black/10 p-2 dark:border-white/10">
+                  <p className="mb-1 text-xs font-medium">Preview</p>
+                  <p className="max-h-64 overflow-y-auto whitespace-pre-line text-xs text-foreground">
+                    {previewContent}
+                  </p>
+
+                  {acceptError && (
+                    <p className="mt-2 text-xs text-red-600">{acceptError}</p>
+                  )}
+
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAccept}
+                      disabled={accepting}
+                      className="rounded bg-foreground px-3 py-1 text-xs font-medium text-background disabled:opacity-50"
+                    >
+                      {accepting ? "Saving..." : "Accept & save"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDiscard}
+                      disabled={accepting}
+                      className="rounded border border-black/10 px-3 py-1 text-xs dark:border-white/10"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

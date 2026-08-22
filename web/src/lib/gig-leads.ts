@@ -1,10 +1,12 @@
 import { apiFetch } from "./api";
 import type {
   GigLead,
+  GigLeadCompletionStatus,
   GigLeadDetailsInput,
   GigLeadInput,
   GigLeadStatus,
 } from "./gig-lead-types";
+import type { Resume } from "./resume-types";
 
 export async function getGigLeads(): Promise<GigLead[]> {
   const res = await apiFetch<{ data: GigLead[] }>("/api/gig-leads");
@@ -30,6 +32,17 @@ export async function updateGigLeadStatus(
   return res.data;
 }
 
+export async function updateGigLeadCompletionStatus(
+  id: number,
+  completion_status: GigLeadCompletionStatus,
+): Promise<GigLead> {
+  const res = await apiFetch<{ data: GigLead }>(`/api/gig-leads/${id}`, {
+    method: "PATCH",
+    body: { completion_status },
+  });
+  return res.data;
+}
+
 export function deleteGigLead(id: number): Promise<void> {
   return apiFetch<void>(`/api/gig-leads/${id}`, { method: "DELETE" });
 }
@@ -50,5 +63,28 @@ export async function updateGigLeadDetails(
     method: "PATCH",
     body: input,
   });
+  return res.data;
+}
+
+export async function tailorResumePreview(
+  gigLeadId: number,
+  resumeId: number,
+): Promise<string> {
+  const res = await apiFetch<{ content: string }>(
+    `/api/gig-leads/${gigLeadId}/tailor-resume`,
+    { method: "POST", body: { resume_id: resumeId } },
+  );
+  return res.content;
+}
+
+export async function acceptTailoredResume(
+  gigLeadId: number,
+  resumeId: number,
+  content: string,
+): Promise<Resume> {
+  const res = await apiFetch<{ data: Resume }>(
+    `/api/gig-leads/${gigLeadId}/tailor-resume/accept`,
+    { method: "POST", body: { resume_id: resumeId, content } },
+  );
   return res.data;
 }

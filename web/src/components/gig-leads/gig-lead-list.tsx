@@ -3,19 +3,25 @@
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import {
+  acceptTailoredResume,
   createGigLead,
   deleteGigLead,
   fetchGigLeadDetails,
   getGigLeads,
+  tailorResumePreview,
+  updateGigLeadCompletionStatus,
   updateGigLeadDetails,
   updateGigLeadStatus,
 } from "@/lib/gig-leads";
 import type {
   GigLead,
+  GigLeadCompletionStatus,
   GigLeadDetailsInput,
   GigLeadInput,
   GigLeadStatus,
 } from "@/lib/gig-lead-types";
+import { getResumes } from "@/lib/resumes";
+import type { Resume } from "@/lib/resume-types";
 import { GigLeadForm } from "./gig-lead-form";
 import { GigLeadItem } from "./gig-lead-item";
 
@@ -29,6 +35,7 @@ export function GigLeadList() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [fetchingId, setFetchingId] = useState<number | null>(null);
   const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [resumes, setResumes] = useState<Resume[]>([]);
 
   useEffect(() => {
     let ignore = false;
@@ -51,6 +58,12 @@ export function GigLeadList() {
     };
   }, [requestId]);
 
+  useEffect(() => {
+    getResumes()
+      .then(setResumes)
+      .catch(() => {});
+  }, []);
+
   function reload() {
     setRequestId((n) => n + 1);
   }
@@ -63,6 +76,14 @@ export function GigLeadList() {
   async function handleSetStatus(id: number, status: GigLeadStatus) {
     await updateGigLeadStatus(id, status);
     reload();
+  }
+
+  async function handleSetCompletionStatus(
+    id: number,
+    completionStatus: GigLeadCompletionStatus,
+  ) {
+    const updated = await updateGigLeadCompletionStatus(id, completionStatus);
+    setLeads((prev) => prev.map((l) => (l.id === id ? updated : l)));
   }
 
   async function handleDelete(id: number) {
@@ -106,6 +127,22 @@ export function GigLeadList() {
     setLeads((prev) => prev.map((l) => (l.id === id ? updated : l)));
   }
 
+  async function handleTailorResume(
+    gigLeadId: number,
+    resumeId: number,
+  ): Promise<string> {
+    return tailorResumePreview(gigLeadId, resumeId);
+  }
+
+  async function handleAcceptTailoredResume(
+    gigLeadId: number,
+    resumeId: number,
+    content: string,
+  ): Promise<void> {
+    const newResume = await acceptTailoredResume(gigLeadId, resumeId, content);
+    setResumes((prev) => [newResume, ...prev]);
+  }
+
   return (
     <div>
       <h1 className="mb-4 text-xl font-semibold">Gig Leads</h1>
@@ -129,10 +166,14 @@ export function GigLeadList() {
               selected={selectedId === lead.id}
               fetchingDetails={fetchingId === lead.id}
               detailsError={selectedId === lead.id ? detailsError : null}
+              resumes={resumes}
               onSelect={handleSelect}
               onSetStatus={handleSetStatus}
+              onSetCompletionStatus={handleSetCompletionStatus}
               onDelete={handleDelete}
               onSaveDetails={handleSaveDetails}
+              onTailorResume={handleTailorResume}
+              onAcceptTailoredResume={handleAcceptTailoredResume}
             />
           ))}
         </ul>

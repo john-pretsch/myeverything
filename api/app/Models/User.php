@@ -71,4 +71,14 @@ class User extends Authenticatable
     {
         return $this->hasMany(GigLead::class);
     }
+
+    public function resumes(): HasMany
+    {
+        return $this->hasMany(Resume::class);
+    }
+
+    public function organizations(): HasMany
+    {
+        return $this->hasMany(Organization::class);
+    }
 }
