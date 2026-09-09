@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
 import { ApiError } from "@/lib/api";
 import type {
   GigLead,
@@ -55,6 +61,7 @@ export function GigLeadItem({
   onSaveDetails,
   onTailorResume,
   onAcceptTailoredResume,
+  onUploadResume,
 }: {
   lead: GigLead;
   selected: boolean;
@@ -75,6 +82,7 @@ export function GigLeadItem({
     resumeId: number,
     content: string,
   ) => Promise<void>;
+  onUploadResume: (file: File) => Promise<Resume>;
 }) {
   const addedAt = new Date(lead.added_at).toLocaleString();
   const heading = lead.title || lead.url;
@@ -105,6 +113,10 @@ export function GigLeadItem({
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
+
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (selected) {
@@ -172,6 +184,23 @@ export function GigLeadItem({
       setAcceptError(errorMessage(err, "Couldn't save the tailored resume."));
     } finally {
       setAccepting(false);
+    }
+  }
+
+  async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const resume = await onUploadResume(file);
+      if (resume.content) setSelectedResumeId(resume.id);
+    } catch (err) {
+      setUploadError(errorMessage(err, "Couldn't upload that resume."));
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -325,14 +354,35 @@ export function GigLeadItem({
 
           {lead.description && (
             <div className="mt-3 border-t border-black/10 pt-3 dark:border-white/10">
-              <p className="mb-2 text-xs font-medium">
-                Tailor a resume for this job
-              </p>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-medium">
+                  Tailor a resume for this job
+                </p>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept=".pdf,.txt,application/pdf,text/plain"
+                  onChange={handleUpload}
+                  disabled={uploading}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => uploadInputRef.current?.click()}
+                  disabled={uploading}
+                  className="rounded border border-black/10 px-3 py-1 text-xs font-medium disabled:opacity-50 dark:border-white/10"
+                >
+                  {uploading ? "Uploading..." : "Upload resume"}
+                </button>
+              </div>
+
+              {uploadError && (
+                <p className="mb-2 text-xs text-red-600">{uploadError}</p>
+              )}
 
               {tailorableResumes.length === 0 ? (
                 <p className="text-xs text-zinc-500">
-                  Upload a resume with parsed text (Account page) to enable
-                  this.
+                  Upload a resume with parsed text to enable this.
                 </p>
               ) : (
                 <div className="flex flex-wrap items-center gap-2">

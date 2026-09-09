@@ -20,7 +20,7 @@ import type {
   GigLeadInput,
   GigLeadStatus,
 } from "@/lib/gig-lead-types";
-import { getResumes } from "@/lib/resumes";
+import { getResumes, uploadResume } from "@/lib/resumes";
 import type { Resume } from "@/lib/resume-types";
 import { GigLeadForm } from "./gig-lead-form";
 import { GigLeadItem } from "./gig-lead-item";
@@ -143,6 +143,12 @@ export function GigLeadList() {
     setResumes((prev) => [newResume, ...prev]);
   }
 
+  async function handleUploadResume(file: File): Promise<Resume> {
+    const newResume = await uploadResume(file);
+    setResumes((prev) => [newResume, ...prev]);
+    return newResume;
+  }
+
   return (
     <div>
       <h1 className="mb-4 text-xl font-semibold">Gig Leads</h1>
@@ -174,6 +180,7 @@ export function GigLeadList() {
               onSaveDetails={handleSaveDetails}
               onTailorResume={handleTailorResume}
               onAcceptTailoredResume={handleAcceptTailoredResume}
+              onUploadResume={handleUploadResume}
             />
           ))}
         </ul>
