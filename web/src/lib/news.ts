@@ -6,9 +6,11 @@ export async function getSources(): Promise<NewsSource[]> {
   return res.data;
 }
 
-export async function getFeed(limit = 50): Promise<NewsArticle[]> {
+export async function getFeed(limit = 50, q = ""): Promise<NewsArticle[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (q.trim() !== "") params.set("q", q.trim());
   const res = await apiFetch<{ data: NewsArticle[] }>(
-    `/api/news/feed?limit=${limit}`,
+    `/api/news/feed?${params.toString()}`,
   );
   return res.data;
 }

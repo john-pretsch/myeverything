@@ -13,7 +13,13 @@ import {
   sendArticleFeedback,
 } from "@/lib/news";
 import type { NewsArticle, NewsSource } from "@/lib/news-types";
+import {
+  addRecentSearch,
+  clearRecentSearches,
+  getRecentSearches,
+} from "@/lib/recent-searches";
 import { ArticleCard } from "./article-card";
+import { NewsSearch } from "./news-search";
 import { SourceManager } from "./source-manager";
 
 export function NewsFeed() {
@@ -23,14 +29,20 @@ export function NewsFeed() {
   const [error, setError] = useState<string | null>(null);
   const [requestId, setRequestId] = useState(0);
   const [resolvedId, setResolvedId] = useState(-1);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const loading = requestId !== resolvedId;
+
+  useEffect(() => {
+    setRecentSearches(getRecentSearches());
+  }, []);
 
   useEffect(() => {
     if (status === "loading") return;
 
     let ignore = false;
 
-    Promise.all([getSources(), getFeed()])
+    Promise.all([getSources(), getFeed(50, searchQuery)])
       .then(([sourcesData, articlesData]) => {
         if (ignore) return;
         setSources(sourcesData);
@@ -47,10 +59,24 @@ export function NewsFeed() {
     return () => {
       ignore = true;
     };
-  }, [status, requestId]);
+  }, [status, requestId, searchQuery]);
 
   function reload() {
     setRequestId((n) => n + 1);
+  }
+
+  function handleSearch(topic: string) {
+    const trimmed = topic.trim();
+    if (trimmed !== "") setRecentSearches(addRecentSearch(trimmed));
+    setSearchQuery(trimmed);
+  }
+
+  function handleClearSearch() {
+    setSearchQuery("");
+  }
+
+  function handleClearRecent() {
+    setRecentSearches(clearRecentSearches());
   }
 
   async function handleAddExisting(sourceId: number) {
@@ -90,11 +116,22 @@ export function NewsFeed() {
     <div className="flex flex-col gap-6 lg:flex-row">
       <div className="flex-1">
         <h1 className="mb-4 text-xl font-semibold">News Feed</h1>
+        <NewsSearch
+          query={searchQuery}
+          recentSearches={recentSearches}
+          onSearch={handleSearch}
+          onClear={handleClearSearch}
+          onClearRecent={handleClearRecent}
+        />
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
         {loading ? (
           <p className="text-sm text-zinc-500">Loading...</p>
         ) : articles.length === 0 ? (
-          <p className="text-sm text-zinc-500">No articles yet.</p>
+          <p className="text-sm text-zinc-500">
+            {searchQuery
+              ? `No articles matching "${searchQuery}".`
+              : "No articles yet."}
+          </p>
         ) : (
           <ul className="flex flex-col gap-4">
             {articles.map((article) => (

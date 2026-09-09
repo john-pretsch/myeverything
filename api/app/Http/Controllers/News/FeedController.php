@@ -18,6 +18,7 @@ class FeedController extends Controller
     {
         $user = $request->user();
         $limit = min((int) $request->integer('limit', 50), 100);
+        $query = trim((string) $request->string('q'));
 
         $sourceIds = $user
             ? $user->newsSources()->pluck('news_sources.id')
@@ -27,8 +28,18 @@ class FeedController extends Controller
             return NewsArticleResource::collection(collect());
         }
 
-        $articles = NewsArticle::with('source')
-            ->whereIn('news_source_id', $sourceIds)
+        $articlesQuery = NewsArticle::with('source')
+            ->whereIn('news_source_id', $sourceIds);
+
+        if ($query !== '') {
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $query);
+            $articlesQuery->where(function ($inner) use ($escaped) {
+                $inner->where('title', 'like', "%{$escaped}%")
+                    ->orWhere('summary', 'like', "%{$escaped}%");
+            });
+        }
+
+        $articles = $articlesQuery
             ->orderByDesc('published_at')
             ->limit(300)
             ->get();
