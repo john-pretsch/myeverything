@@ -110,6 +110,10 @@ export function GigLeadItem({
   const [tailoring, setTailoring] = useState(false);
   const [tailorError, setTailorError] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [previewSourceResumeId, setPreviewSourceResumeId] = useState<
+    number | null
+  >(null);
+  const [comparing, setComparing] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
@@ -164,6 +168,8 @@ export function GigLeadItem({
     try {
       const content = await onTailorResume(lead.id, selectedResumeId);
       setPreviewContent(content);
+      setPreviewSourceResumeId(selectedResumeId);
+      setComparing(false);
     } catch (err) {
       setTailorError(errorMessage(err, "Couldn't customize that resume."));
     } finally {
@@ -206,6 +212,8 @@ export function GigLeadItem({
 
   function handleDiscard() {
     setPreviewContent(null);
+    setPreviewSourceResumeId(null);
+    setComparing(false);
     setTailorError(null);
   }
 
@@ -420,10 +428,40 @@ export function GigLeadItem({
 
               {previewContent !== null && (
                 <div className="mt-2 rounded border border-black/10 p-2 dark:border-white/10">
-                  <p className="mb-1 text-xs font-medium">Preview</p>
-                  <p className="max-h-64 overflow-y-auto whitespace-pre-line text-xs text-foreground">
-                    {previewContent}
-                  </p>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium">Preview</p>
+                    <button
+                      type="button"
+                      onClick={() => setComparing((c) => !c)}
+                      className="text-xs font-medium hover:underline"
+                    >
+                      {comparing ? "Hide comparison" : "Compare side by side"}
+                    </button>
+                  </div>
+
+                  {comparing ? (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div>
+                        <p className="mb-1 text-xs text-zinc-500">Original</p>
+                        <p className="max-h-64 overflow-y-auto whitespace-pre-line rounded border border-black/10 p-2 text-xs text-foreground dark:border-white/10">
+                          {resumes.find((r) => r.id === previewSourceResumeId)
+                            ?.content || "(no text available)"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs text-zinc-500">
+                          Customized
+                        </p>
+                        <p className="max-h-64 overflow-y-auto whitespace-pre-line rounded border border-black/10 p-2 text-xs text-foreground dark:border-white/10">
+                          {previewContent}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="max-h-64 overflow-y-auto whitespace-pre-line text-xs text-foreground">
+                      {previewContent}
+                    </p>
+                  )}
 
                   {acceptError && (
                     <p className="mt-2 text-xs text-red-600">{acceptError}</p>
