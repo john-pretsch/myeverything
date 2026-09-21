@@ -21,10 +21,8 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/two-factor-challenge', [AuthController::class, 'twoFactorChallenge']);
 
-Route::middleware('web')->group(function () {
-    Route::get('/auth/sso/redirect', [SsoController::class, 'redirect']);
-    Route::get('/auth/sso/callback', [SsoController::class, 'callback']);
-});
+Route::get('/auth/sso/redirect', [SsoController::class, 'redirect']);
+Route::get('/auth/sso/callback', [SsoController::class, 'callback']);
 
 Route::post('/forgot-password', [PasswordResetController::class, 'forgotPassword'])
     ->middleware('throttle:6,1');
