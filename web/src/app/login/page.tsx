@@ -3,8 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import { ApiError } from "@/lib/api";
+import { API_URL, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+
+function signInWithSso() {
+  window.location.href = `${API_URL}/api/auth/sso/redirect`;
+}
 
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
@@ -128,6 +132,14 @@ export default function LoginPage() {
       <h1 className="mb-6 text-xl font-semibold">
         {mode === "login" ? "Log in" : "Create an account"}
       </h1>
+      <button
+        type="button"
+        onClick={signInWithSso}
+        className="mb-4 rounded border border-black/10 px-4 py-2 text-sm font-medium dark:border-white/10"
+      >
+        Sign in with Jepflow
+      </button>
+      <div className="mb-4 text-center text-xs text-zinc-500">or</div>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {mode === "register" && (
           <label className="flex flex-col gap-1 text-sm">
