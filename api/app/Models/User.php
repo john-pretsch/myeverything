@@ -81,4 +81,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(Organization::class);
     }
+
+    public function brainiacAttempts(): HasMany
+    {
+        return $this->hasMany(BrainiacAttempt::class);
+    }
 }

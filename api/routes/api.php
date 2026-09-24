@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\Auth\SsoController;
 use App\Http\Controllers\Auth\TwoFactorAuthenticationController;
+use App\Http\Controllers\BrainiacController;
 use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\GigLeadController;
 use App\Http\Controllers\Market\MarketController;
@@ -64,6 +65,14 @@ Route::middleware('auth:sanctum')->prefix('todos')->group(function () {
     Route::patch('/{todo}', [TodoController::class, 'update']);
     Route::delete('/{todo}', [TodoController::class, 'destroy']);
     Route::post('/{todo}/toggle', [TodoController::class, 'toggle']);
+});
+
+Route::middleware('auth:sanctum')->prefix('brainiac')->group(function () {
+    Route::get('/attempts', [BrainiacController::class, 'index']);
+    Route::post('/attempts', [BrainiacController::class, 'store']);
+    Route::get('/attempts/{attempt}', [BrainiacController::class, 'show']);
+    Route::post('/attempts/{attempt}/answers', [BrainiacController::class, 'answer']);
+    Route::post('/attempts/{attempt}/complete', [BrainiacController::class, 'complete']);
 });
 
 Route::middleware('auth:sanctum')->prefix('gig-leads')->group(function () {

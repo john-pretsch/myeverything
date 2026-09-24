@@ -10,7 +10,7 @@ const TABS = [
   { href: "/todo", label: "Todo", requiresAuth: true },
   { href: "/gig-leads", label: "Gig Leads", requiresAuth: true },
   { href: "/weather", label: "Weather", requiresAuth: false },
-  { href: "/brainiac", label: "Brainiac", requiresAuth: false },
+  { href: "/brainiac", label: "Brainiac", requiresAuth: true },
 ] as const;
 
 export function TabNav() {

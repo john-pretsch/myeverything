@@ -1,10 +1,10 @@
+import { BrainiacAssessment } from "@/components/brainiac/brainiac-assessment";
+import { RequireAuth } from "@/components/require-auth";
+
 export default function BrainiacPage() {
   return (
-    <div>
-      <h1 className="mb-2 text-xl font-semibold">Brainiac</h1>
-      <p className="text-sm text-zinc-500">
-        Cognitive exercises. Not wired up yet.
-      </p>
-    </div>
+    <RequireAuth>
+      <BrainiacAssessment />
+    </RequireAuth>
   );
 }
