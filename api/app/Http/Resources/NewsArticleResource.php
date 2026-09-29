@@ -20,7 +20,7 @@ class NewsArticleResource extends JsonResource
                 'id' => $this->source->id,
                 'name' => $this->source->name,
             ],
-            'feedback' => $this->when($this->viewer_feedback !== null, fn () => $this->viewer_feedback),
+            'tags' => $this->article_tags ?? [],
         ];
     }
 }

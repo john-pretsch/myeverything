@@ -1,3 +1,4 @@
+import { useState, type FormEvent } from "react";
 import type { NewsArticle } from "@/lib/news-types";
 
 function formatPublished(published_at: string | null): string {
@@ -13,13 +14,33 @@ function formatPublished(published_at: string | null): string {
 
 export function ArticleCard({
   article,
-  canRate,
-  onFeedback,
+  canTag,
+  onApplyTag,
+  onDetachTag,
+  onVoteTag,
 }: {
   article: NewsArticle;
-  canRate: boolean;
-  onFeedback: (articleId: number, direction: 1 | -1) => void;
+  canTag: boolean;
+  onApplyTag: (articleId: number, name: string) => Promise<void>;
+  onDetachTag: (articleId: number, tagId: number) => void;
+  onVoteTag: (tagId: number, direction: 1 | -1) => void;
 }) {
+  const [newTag, setNewTag] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleAddTag(event: FormEvent) {
+    event.preventDefault();
+    const name = newTag.trim();
+    if (name === "") return;
+    setSubmitting(true);
+    try {
+      await onApplyTag(article.id, name);
+      setNewTag("");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <li className="flex gap-4 rounded border border-black/10 p-4 dark:border-white/10">
       {article.image_url && (
@@ -50,30 +71,66 @@ export function ArticleCard({
             {article.summary}
           </p>
         )}
-        {canRate && (
-          <div className="mt-2 flex gap-2 text-xs">
-            <button
-              type="button"
-              onClick={() => onFeedback(article.id, 1)}
-              className={`rounded border px-2 py-1 ${
-                article.feedback === 1
-                  ? "border-foreground font-medium"
-                  : "border-black/10 text-zinc-500 hover:text-foreground dark:border-white/10"
-              }`}
-            >
-              More like this
-            </button>
-            <button
-              type="button"
-              onClick={() => onFeedback(article.id, -1)}
-              className={`rounded border px-2 py-1 ${
-                article.feedback === -1
-                  ? "border-foreground font-medium"
-                  : "border-black/10 text-zinc-500 hover:text-foreground dark:border-white/10"
-              }`}
-            >
-              Less like this
-            </button>
+        {(article.tags.length > 0 || canTag) && (
+          <div className="mt-2 flex flex-wrap items-center gap-1">
+            {article.tags.map((tag) => (
+              <span
+                key={tag.id}
+                className="flex items-center gap-1 rounded-full border border-black/10 px-2 py-0.5 text-xs text-zinc-500 dark:border-white/10"
+              >
+                {canTag && (
+                  <button
+                    type="button"
+                    aria-label={`Upvote tag ${tag.name}`}
+                    onClick={() => onVoteTag(tag.id, 1)}
+                    className={
+                      tag.viewer_vote === 1
+                        ? "font-medium text-foreground"
+                        : "hover:text-foreground"
+                    }
+                  >
+                    ▲
+                  </button>
+                )}
+                {tag.name}
+                {canTag && (
+                  <button
+                    type="button"
+                    aria-label={`Downvote tag ${tag.name}`}
+                    onClick={() => onVoteTag(tag.id, -1)}
+                    className={
+                      tag.viewer_vote === -1
+                        ? "font-medium text-foreground"
+                        : "hover:text-foreground"
+                    }
+                  >
+                    ▼
+                  </button>
+                )}
+                {canTag && (
+                  <button
+                    type="button"
+                    aria-label={`Remove tag ${tag.name}`}
+                    onClick={() => onDetachTag(article.id, tag.id)}
+                    className="hover:text-red-600"
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+            {canTag && (
+              <form onSubmit={handleAddTag} className="inline-flex">
+                <input
+                  type="text"
+                  placeholder="+ tag"
+                  value={newTag}
+                  onChange={(e) => setNewTag(e.target.value)}
+                  disabled={submitting}
+                  className="w-16 rounded-full border border-dashed border-black/10 px-2 py-0.5 text-xs disabled:opacity-50 dark:border-white/20"
+                />
+              </form>
+            )}
           </div>
         )}
       </div>

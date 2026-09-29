@@ -41,11 +41,6 @@ class User extends Authenticatable
             ->orderByPivot('position');
     }
 
-    public function newsArticleFeedback(): HasMany
-    {
-        return $this->hasMany(NewsArticleFeedback::class);
-    }
-
     public function todos(): HasMany
     {
         return $this->hasMany(Todo::class)->orderBy('position');

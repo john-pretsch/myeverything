@@ -17,6 +17,13 @@ export type NewsSource = {
   position: number | null;
 };
 
+export type Tag = {
+  id: number;
+  name: string;
+  usage_count?: number;
+  viewer_vote?: 1 | -1 | null;
+};
+
 export type NewsArticle = {
   id: number;
   title: string;
@@ -25,5 +32,5 @@ export type NewsArticle = {
   image_url: string | null;
   published_at: string | null;
   source: { id: number; name: string };
-  feedback?: 1 | -1;
+  tags: Tag[];
 };

@@ -2,16 +2,17 @@
 
 namespace App\Models;
 
+use Database\Factories\NewsArticleFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 #[Fillable(['news_source_id', 'guid', 'title', 'url', 'summary', 'image_url', 'published_at'])]
 class NewsArticle extends Model
 {
-    /** @use HasFactory<\Database\Factories\NewsArticleFactory> */
+    /** @use HasFactory<NewsArticleFactory> */
     use HasFactory;
 
     protected function casts(): array
@@ -26,8 +27,10 @@ class NewsArticle extends Model
         return $this->belongsTo(NewsSource::class, 'news_source_id');
     }
 
-    public function feedback(): HasMany
+    public function tags(): BelongsToMany
     {
-        return $this->hasMany(NewsArticleFeedback::class);
+        return $this->belongsToMany(Tag::class, 'news_article_tag')
+            ->withPivot('applied_by_user_id')
+            ->withTimestamps();
     }
 }

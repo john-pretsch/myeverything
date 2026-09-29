@@ -5,14 +5,23 @@ import { useAuth } from "@/lib/auth-context";
 import {
   addCustomSource,
   addExistingSource,
-  clearArticleFeedback,
+  applyTagToArticle,
+  clearTagVote,
+  deleteTag,
+  detachTagFromArticle,
   getFeed,
   getSources,
+  getTags,
   removeSource,
   reorderSources,
-  sendArticleFeedback,
+  voteTag,
 } from "@/lib/news";
-import { NEWS_TOPICS, type NewsArticle, type NewsSource } from "@/lib/news-types";
+import {
+  NEWS_TOPICS,
+  type NewsArticle,
+  type NewsSource,
+  type Tag,
+} from "@/lib/news-types";
 import {
   addRecentSearch,
   clearRecentSearches,
@@ -21,11 +30,13 @@ import {
 import { ArticleCard } from "./article-card";
 import { NewsSearch } from "./news-search";
 import { SourceManager } from "./source-manager";
+import { TagManager } from "./tag-manager";
 
 export function NewsFeed() {
   const { status } = useAuth();
   const [sources, setSources] = useState<NewsSource[]>([]);
   const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [requestId, setRequestId] = useState(0);
   const [resolvedId, setResolvedId] = useState(-1);
@@ -43,11 +54,12 @@ export function NewsFeed() {
 
     let ignore = false;
 
-    Promise.all([getSources(), getFeed(50, searchQuery, topic)])
-      .then(([sourcesData, articlesData]) => {
+    Promise.all([getSources(), getFeed(50, searchQuery, topic), getTags()])
+      .then(([sourcesData, articlesData, tagsData]) => {
         if (ignore) return;
         setSources(sourcesData);
         setArticles(articlesData);
+        setTags(tagsData);
         setError(null);
       })
       .catch(() => {
@@ -100,13 +112,30 @@ export function NewsFeed() {
     setSources(updated);
   }
 
-  async function handleFeedback(articleId: number, direction: 1 | -1) {
-    const article = articles.find((a) => a.id === articleId);
-    if (article?.feedback === direction) {
-      await clearArticleFeedback(articleId);
+  async function handleVoteTag(tagId: number, direction: 1 | -1) {
+    const currentVote = articles
+      .flatMap((a) => a.tags)
+      .find((t) => t.id === tagId)?.viewer_vote;
+    if (currentVote === direction) {
+      await clearTagVote(tagId);
     } else {
-      await sendArticleFeedback(articleId, direction);
+      await voteTag(tagId, direction);
     }
+    reload();
+  }
+
+  async function handleApplyTag(articleId: number, name: string) {
+    await applyTagToArticle(articleId, { name });
+    reload();
+  }
+
+  async function handleDetachTag(articleId: number, tagId: number) {
+    await detachTagFromArticle(articleId, tagId);
+    reload();
+  }
+
+  async function handleDeleteTag(tagId: number) {
+    await deleteTag(tagId);
     reload();
   }
 
@@ -166,24 +195,33 @@ export function NewsFeed() {
               <ArticleCard
                 key={article.id}
                 article={article}
-                canRate={status === "authenticated"}
-                onFeedback={handleFeedback}
+                canTag={status === "authenticated"}
+                onApplyTag={handleApplyTag}
+                onDetachTag={handleDetachTag}
+                onVoteTag={handleVoteTag}
               />
             ))}
           </ul>
         )}
       </div>
-      <div className="w-full lg:w-72 lg:flex-shrink-0">
+      <div className="flex w-full flex-col gap-4 lg:w-72 lg:flex-shrink-0">
         {!loading && (
-          <SourceManager
-            addedSources={addedSources}
-            catalogSources={catalogSources}
-            canManage={status === "authenticated"}
-            onAddExisting={handleAddExisting}
-            onAddCustom={handleAddCustom}
-            onRemove={handleRemove}
-            onReorder={handleReorder}
-          />
+          <>
+            <SourceManager
+              addedSources={addedSources}
+              catalogSources={catalogSources}
+              canManage={status === "authenticated"}
+              onAddExisting={handleAddExisting}
+              onAddCustom={handleAddCustom}
+              onRemove={handleRemove}
+              onReorder={handleReorder}
+            />
+            <TagManager
+              tags={tags}
+              canManage={status === "authenticated"}
+              onDelete={handleDeleteTag}
+            />
+          </>
         )}
       </div>
     </div>

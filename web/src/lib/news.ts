@@ -1,5 +1,5 @@
 import { apiFetch } from "./api";
-import type { NewsArticle, NewsSource } from "./news-types";
+import type { NewsArticle, NewsSource, Tag } from "./news-types";
 
 export async function getSources(): Promise<NewsSource[]> {
   const res = await apiFetch<{ data: NewsSource[] }>("/api/news/sources");
@@ -55,18 +55,56 @@ export async function reorderSources(
   return res.data;
 }
 
-export function sendArticleFeedback(
+export async function getTags(): Promise<Tag[]> {
+  const res = await apiFetch<{ data: Tag[] }>("/api/news/tags");
+  return res.data;
+}
+
+export async function createTag(name: string): Promise<Tag> {
+  const res = await apiFetch<{ data: Tag }>("/api/news/tags", {
+    method: "POST",
+    body: { name },
+  });
+  return res.data;
+}
+
+export function deleteTag(tagId: number): Promise<void> {
+  return apiFetch<void>(`/api/news/tags/${tagId}`, { method: "DELETE" });
+}
+
+export async function applyTagToArticle(
   articleId: number,
+  tag: { tagId: number } | { name: string },
+): Promise<Tag> {
+  const body = "tagId" in tag ? { tag_id: tag.tagId } : { name: tag.name };
+  const res = await apiFetch<{ data: Tag }>(
+    `/api/news/articles/${articleId}/tags`,
+    { method: "POST", body },
+  );
+  return res.data;
+}
+
+export function detachTagFromArticle(
+  articleId: number,
+  tagId: number,
+): Promise<void> {
+  return apiFetch<void>(`/api/news/articles/${articleId}/tags/${tagId}`, {
+    method: "DELETE",
+  });
+}
+
+export function voteTag(
+  tagId: number,
   direction: 1 | -1,
 ): Promise<{ direction: 1 | -1 }> {
-  return apiFetch(`/api/news/articles/${articleId}/feedback`, {
+  return apiFetch(`/api/news/tags/${tagId}/vote`, {
     method: "POST",
     body: { direction },
   });
 }
 
-export function clearArticleFeedback(articleId: number): Promise<void> {
-  return apiFetch<void>(`/api/news/articles/${articleId}/feedback`, {
+export function clearTagVote(tagId: number): Promise<void> {
+  return apiFetch<void>(`/api/news/tags/${tagId}/vote`, {
     method: "DELETE",
   });
 }
