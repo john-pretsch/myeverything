@@ -10,7 +10,7 @@ class RssParser
     /**
      * Parse an RSS 2.0 or Atom feed body into a normalized list of items.
      *
-     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon, categories: array<int, string>}>
+     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
      */
     public function parse(string $body): array
     {
@@ -34,7 +34,7 @@ class RssParser
     }
 
     /**
-     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon, categories: array<int, string>}>
+     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
      */
     private function parseRss(SimpleXMLElement $xml): array
     {
@@ -60,14 +60,6 @@ class RssParser
 
             $pubDate = trim((string) $item->pubDate);
 
-            $categories = [];
-            foreach ($item->category as $categoryEl) {
-                $value = trim((string) $categoryEl);
-                if ($value !== '') {
-                    $categories[] = $value;
-                }
-            }
-
             $items[] = [
                 'guid' => $guid,
                 'title' => $title,
@@ -75,7 +67,6 @@ class RssParser
                 'summary' => $this->cleanSummary((string) $item->description) ?: null,
                 'image_url' => $imageUrl ?: null,
                 'published_at' => $pubDate !== '' ? $this->parseDate($pubDate) : null,
-                'categories' => $categories,
             ];
         }
 
@@ -85,7 +76,7 @@ class RssParser
     }
 
     /**
-     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon, categories: array<int, string>}>
+     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
      */
     private function parseAtom(SimpleXMLElement $xml): array
     {
@@ -110,14 +101,6 @@ class RssParser
 
             $published = trim((string) ($entry->published ?: $entry->updated));
 
-            $categories = [];
-            foreach ($entry->category as $categoryEl) {
-                $value = trim((string) $categoryEl->attributes()->term);
-                if ($value !== '') {
-                    $categories[] = $value;
-                }
-            }
-
             $items[] = [
                 'guid' => $guid,
                 'title' => $title,
@@ -125,7 +108,6 @@ class RssParser
                 'summary' => $this->cleanSummary((string) $entry->summary) ?: null,
                 'image_url' => null,
                 'published_at' => $published !== '' ? $this->parseDate($published) : null,
-                'categories' => $categories,
             ];
         }
 

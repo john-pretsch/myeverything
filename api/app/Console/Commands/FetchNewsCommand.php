@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Models\NewsArticle;
 use App\Models\NewsSource;
-use App\Models\Tag;
 use App\Services\News\RssParser;
 use App\Support\HostSafety;
 use Illuminate\Console\Attributes\Description;
@@ -53,7 +52,7 @@ class FetchNewsCommand extends Command
             $items = $parser->parse($response->body());
 
             foreach ($items as $item) {
-                $article = NewsArticle::updateOrCreate(
+                NewsArticle::updateOrCreate(
                     ['news_source_id' => $source->id, 'guid' => $item['guid']],
                     [
                         'title' => $item['title'],
@@ -63,8 +62,6 @@ class FetchNewsCommand extends Command
                         'published_at' => $item['published_at'],
                     ],
                 );
-
-                $this->attachCategoryTags($article, $item['categories'] ?? []);
             }
 
             $source->update(['last_fetched_at' => now(), 'last_fetch_error' => null]);
@@ -72,29 +69,6 @@ class FetchNewsCommand extends Command
         } catch (\Throwable $e) {
             $source->update(['last_fetch_error' => $e->getMessage()]);
             $this->error("Failed to fetch {$source->name}: {$e->getMessage()}");
-        }
-    }
-
-    /**
-     * Additive only — never detaches a tag based on feed content, so a
-     * re-fetch can't remove a tag a user applied, or fight a user's manual
-     * detach of an RSS-sourced one (if the category is still present in
-     * the feed next time, it will simply re-attach — expected, not a bug).
-     *
-     * @param  array<int, string>  $categories
-     */
-    private function attachCategoryTags(NewsArticle $article, array $categories): void
-    {
-        foreach ($categories as $category) {
-            $name = trim($category);
-
-            if ($name === '' || mb_strlen($name) > 50) {
-                continue;
-            }
-
-            $tag = Tag::firstOrCreate(['name' => $name]);
-
-            $article->tags()->syncWithoutDetaching([$tag->id => ['applied_by_user_id' => null]]);
         }
     }
 }

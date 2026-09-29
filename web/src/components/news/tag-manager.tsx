@@ -21,13 +21,6 @@ export function TagManager({
     );
   }
 
-  function handleDelete(tag: Tag) {
-    if (!confirm(`Delete tag "${tag.name}"? This removes it from every article for everyone.`)) {
-      return;
-    }
-    onDelete(tag.id);
-  }
-
   const visibleTags = tags.filter((tag) => tag.usage_count !== 0);
 
   return (
@@ -50,7 +43,7 @@ export function TagManager({
             <button
               type="button"
               aria-label={`Delete tag ${tag.name}`}
-              onClick={() => handleDelete(tag)}
+              onClick={() => onDelete(tag.id)}
               className="text-zinc-500 hover:text-red-600"
             >
               ×

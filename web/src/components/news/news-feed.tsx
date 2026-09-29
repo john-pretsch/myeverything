@@ -131,12 +131,21 @@ export function NewsFeed() {
 
   async function handleDetachTag(articleId: number, tagId: number) {
     await detachTagFromArticle(articleId, tagId);
-    reload();
+    setArticles((prev) =>
+      prev.map((a) =>
+        a.id === articleId
+          ? { ...a, tags: a.tags.filter((t) => t.id !== tagId) }
+          : a,
+      ),
+    );
   }
 
   async function handleDeleteTag(tagId: number) {
     await deleteTag(tagId);
-    reload();
+    setTags((prev) => prev.filter((t) => t.id !== tagId));
+    setArticles((prev) =>
+      prev.map((a) => ({ ...a, tags: a.tags.filter((t) => t.id !== tagId) })),
+    );
   }
 
   const addedSources = sources.filter((s) => s.is_added);
