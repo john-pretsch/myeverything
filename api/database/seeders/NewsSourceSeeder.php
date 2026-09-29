@@ -83,6 +83,42 @@ class NewsSourceSeeder extends Seeder
                 'feed_url' => 'https://krebsonsecurity.com/feed/',
                 'topic' => 'hackery',
             ],
+            [
+                'name' => 'Bellingcat',
+                'site_url' => 'https://www.bellingcat.com',
+                'feed_url' => 'https://www.bellingcat.com/feed/',
+                'topic' => 'world',
+            ],
+            [
+                'name' => 'ICIJ',
+                'site_url' => 'https://www.icij.org',
+                'feed_url' => 'https://www.icij.org/feed/',
+                'topic' => 'world',
+            ],
+            [
+                'name' => 'OCCRP',
+                'site_url' => 'https://www.occrp.org',
+                'feed_url' => 'https://www.occrp.org/en/feed',
+                'topic' => 'world',
+            ],
+            [
+                'name' => 'Democracy Now',
+                'site_url' => 'https://www.democracynow.org',
+                'feed_url' => 'https://www.democracynow.org/democracynow.rss',
+                'topic' => 'world',
+            ],
+            [
+                'name' => 'ProPublica',
+                'site_url' => 'https://www.propublica.org',
+                'feed_url' => 'https://www.propublica.org/feeds/propublica/main',
+                'topic' => 'world',
+            ],
+            [
+                'name' => 'The Intercept',
+                'site_url' => 'https://theintercept.com',
+                'feed_url' => 'https://theintercept.com/feed/',
+                'topic' => 'world',
+            ],
         ];
 
         $newlyDefaulted = collect();
