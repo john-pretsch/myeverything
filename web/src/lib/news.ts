@@ -1,5 +1,5 @@
 import { apiFetch } from "./api";
-import type { NewsArticle, NewsSource, Tag } from "./news-types";
+import type { NewsArticle, NewsSource, Tag, Topic } from "./news-types";
 
 export async function getSources(): Promise<NewsSource[]> {
   const res = await apiFetch<{ data: NewsSource[] }>("/api/news/sources");
@@ -9,14 +9,21 @@ export async function getSources(): Promise<NewsSource[]> {
 export async function getFeed(
   limit = 50,
   q = "",
-  topic = "",
+  topicId: number | null = null,
+  sourceId: number | null = null,
 ): Promise<NewsArticle[]> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (q.trim() !== "") params.set("q", q.trim());
-  if (topic.trim() !== "") params.set("topic", topic.trim());
+  if (topicId !== null) params.set("topic", String(topicId));
+  if (sourceId !== null) params.set("source", String(sourceId));
   const res = await apiFetch<{ data: NewsArticle[] }>(
     `/api/news/feed?${params.toString()}`,
   );
+  return res.data;
+}
+
+export async function getTopics(): Promise<Topic[]> {
+  const res = await apiFetch<{ data: Topic[] }>("/api/news/topics");
   return res.data;
 }
 

@@ -12,21 +12,23 @@ import {
   getFeed,
   getSources,
   getTags,
+  getTopics,
   removeSource,
   reorderSources,
   voteTag,
 } from "@/lib/news";
 import {
-  NEWS_TOPICS,
   type NewsArticle,
   type NewsSource,
   type Tag,
+  type Topic,
 } from "@/lib/news-types";
 import {
   addRecentSearch,
   clearRecentSearches,
   getRecentSearches,
 } from "@/lib/recent-searches";
+import { topicColor } from "@/lib/topic-colors";
 import { ArticleCard } from "./article-card";
 import { NewsSearch } from "./news-search";
 import { SourceManager } from "./source-manager";
@@ -37,12 +39,16 @@ export function NewsFeed() {
   const [sources, setSources] = useState<NewsSource[]>([]);
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [requestId, setRequestId] = useState(0);
   const [resolvedId, setResolvedId] = useState(-1);
   const [searchQuery, setSearchQuery] = useState("");
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
-  const [topic, setTopic] = useState("");
+  const [topicId, setTopicId] = useState<number | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState<number | null>(
+    null,
+  );
   const loading = requestId !== resolvedId;
 
   useEffect(() => {
@@ -54,12 +60,18 @@ export function NewsFeed() {
 
     let ignore = false;
 
-    Promise.all([getSources(), getFeed(50, searchQuery, topic), getTags()])
-      .then(([sourcesData, articlesData, tagsData]) => {
+    Promise.all([
+      getSources(),
+      getFeed(50, searchQuery, topicId, selectedSourceId),
+      getTags(),
+      getTopics(),
+    ])
+      .then(([sourcesData, articlesData, tagsData, topicsData]) => {
         if (ignore) return;
         setSources(sourcesData);
         setArticles(articlesData);
         setTags(tagsData);
+        setTopics(topicsData);
         setError(null);
       })
       .catch(() => {
@@ -72,7 +84,7 @@ export function NewsFeed() {
     return () => {
       ignore = true;
     };
-  }, [status, requestId, searchQuery, topic]);
+  }, [status, requestId, searchQuery, topicId, selectedSourceId]);
 
   function reload() {
     setRequestId((n) => n + 1);
@@ -158,27 +170,30 @@ export function NewsFeed() {
         <div className="mb-4 flex gap-1">
           <button
             type="button"
-            onClick={() => setTopic("")}
+            onClick={() => setTopicId(null)}
             className={`rounded px-3 py-1.5 text-sm font-medium ${
-              topic === ""
+              topicId === null
                 ? "bg-foreground text-background"
                 : "border border-black/10 text-zinc-500 dark:border-white/10"
             }`}
           >
             All
           </button>
-          {NEWS_TOPICS.map((t) => (
+          {topics.map((t) => (
             <button
-              key={t.value}
+              key={t.id}
               type="button"
-              onClick={() => setTopic(t.value)}
-              className={`rounded px-3 py-1.5 text-sm font-medium ${
-                topic === t.value
+              onClick={() => setTopicId(t.id)}
+              className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium ${
+                topicId === t.id
                   ? "bg-foreground text-background"
                   : "border border-black/10 text-zinc-500 dark:border-white/10"
               }`}
             >
-              {t.label}
+              <span
+                className={`h-2 w-2 rounded-full ${topicColor(t.id).dot}`}
+              />
+              {t.name}
             </button>
           ))}
         </div>
@@ -189,6 +204,21 @@ export function NewsFeed() {
           onClear={handleClearSearch}
           onClearRecent={handleClearRecent}
         />
+        {selectedSourceId !== null && (
+          <p className="mb-4 text-sm text-zinc-500">
+            Showing{" "}
+            {sources.find((s) => s.id === selectedSourceId)?.name ??
+              "this source"}{" "}
+            only.{" "}
+            <button
+              type="button"
+              onClick={() => setSelectedSourceId(null)}
+              className="font-medium underline"
+            >
+              Clear
+            </button>
+          </p>
+        )}
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
         {loading ? (
           <p className="text-sm text-zinc-500">Loading...</p>
@@ -220,6 +250,8 @@ export function NewsFeed() {
               addedSources={addedSources}
               catalogSources={catalogSources}
               canManage={status === "authenticated"}
+              selectedSourceId={selectedSourceId}
+              onSelectSource={setSelectedSourceId}
               onAddExisting={handleAddExisting}
               onAddCustom={handleAddCustom}
               onRemove={handleRemove}

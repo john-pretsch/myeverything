@@ -9,6 +9,8 @@ export function SourceManager({
   addedSources,
   catalogSources,
   canManage,
+  selectedSourceId,
+  onSelectSource,
   onAddExisting,
   onAddCustom,
   onRemove,
@@ -17,6 +19,8 @@ export function SourceManager({
   addedSources: NewsSource[];
   catalogSources: NewsSource[];
   canManage: boolean;
+  selectedSourceId: number | null;
+  onSelectSource: (sourceId: number | null) => void;
   onAddExisting: (sourceId: number) => Promise<void>;
   onAddCustom: (name: string, feedUrl: string) => Promise<void>;
   onRemove: (sourceId: number) => Promise<void>;
@@ -31,9 +35,23 @@ export function SourceManager({
     return (
       <div className="rounded border border-black/10 p-4 text-sm dark:border-white/10">
         <p className="mb-1 font-medium">Sources</p>
-        <ul className="mb-3 text-zinc-500">
+        <ul className="mb-3 flex flex-col gap-1">
           {addedSources.map((s) => (
-            <li key={s.id}>{s.name}</li>
+            <li key={s.id}>
+              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(selectedSourceId === s.id ? null : s.id)
+                }
+                className={
+                  selectedSourceId === s.id
+                    ? "cursor-pointer font-medium text-foreground"
+                    : "cursor-pointer text-zinc-500 hover:text-foreground"
+                }
+              >
+                {s.name}
+              </button>
+            </li>
           ))}
         </ul>
         <Link href="/login" className="text-sm font-medium underline">
@@ -84,7 +102,21 @@ export function SourceManager({
               key={source.id}
               className="flex items-center justify-between gap-2 text-sm"
             >
-              <span>{source.name}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(
+                    selectedSourceId === source.id ? null : source.id,
+                  )
+                }
+                className={
+                  selectedSourceId === source.id
+                    ? "cursor-pointer font-medium text-foreground"
+                    : "cursor-pointer hover:text-foreground"
+                }
+              >
+                {source.name}
+              </button>
               <span className="flex items-center gap-1">
                 <button
                   type="button"

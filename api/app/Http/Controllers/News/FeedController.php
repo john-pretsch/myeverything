@@ -19,14 +19,19 @@ class FeedController extends Controller
         $user = $request->user();
         $limit = min((int) $request->integer('limit', 50), 100);
         $query = trim((string) $request->string('q'));
-        $topic = trim((string) $request->string('topic'));
+        $topicId = $request->integer('topic');
+        $sourceId = $request->integer('source');
 
         $sources = $user
             ? $user->newsSources()
             : NewsSource::where('is_default', true);
 
-        if ($topic !== '') {
-            $sources->where('topic', $topic);
+        if ($topicId) {
+            $sources->whereHas('topics', fn ($q) => $q->where('topics.id', $topicId));
+        }
+
+        if ($sourceId) {
+            $sources->where('news_sources.id', $sourceId);
         }
 
         $sourceIds = $user ? $sources->pluck('news_sources.id') : $sources->pluck('id');
@@ -35,7 +40,7 @@ class FeedController extends Controller
             return NewsArticleResource::collection(collect());
         }
 
-        $articlesQuery = NewsArticle::with('source')
+        $articlesQuery = NewsArticle::with('source.topics')
             ->whereIn('news_source_id', $sourceIds);
 
         if ($query !== '') {
@@ -55,16 +60,14 @@ class FeedController extends Controller
             ? DB::table('tag_votes')->where('user_id', $user->id)->pluck('direction', 'tag_id')
             : collect();
 
-        // Tags are per-user: each viewer only sees the tags they personally applied.
-        $tagsByArticle = $user
-            ? DB::table('news_article_tag')
-                ->join('tags', 'tags.id', '=', 'news_article_tag.tag_id')
-                ->where('news_article_tag.applied_by_user_id', $user->id)
-                ->whereIn('news_article_tag.news_article_id', $articles->pluck('id'))
-                ->select('news_article_tag.news_article_id', 'tags.id as tag_id', 'tags.name as tag_name')
-                ->get()
-                ->groupBy('news_article_id')
-            : collect();
+        // Tags are shared/global — every viewer sees every tag applied to
+        // an article, regardless of who applied it.
+        $tagsByArticle = DB::table('news_article_tag')
+            ->join('tags', 'tags.id', '=', 'news_article_tag.tag_id')
+            ->whereIn('news_article_tag.news_article_id', $articles->pluck('id'))
+            ->select('news_article_tag.news_article_id', 'tags.id as tag_id', 'tags.name as tag_name')
+            ->get()
+            ->groupBy('news_article_id');
 
         $articles = $articles
             ->sortByDesc(function (NewsArticle $article) use ($tagVotes, $tagsByArticle) {

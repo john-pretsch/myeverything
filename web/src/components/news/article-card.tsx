@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import type { NewsArticle } from "@/lib/news-types";
+import { topicColor } from "@/lib/topic-colors";
 
 function formatPublished(published_at: string | null): string {
   if (!published_at) return "";
@@ -27,6 +28,8 @@ export function ArticleCard({
 }) {
   const [newTag, setNewTag] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const primaryTopic = article.source.topics[0];
+  const accentBorder = primaryTopic ? topicColor(primaryTopic.id).border : "";
 
   async function handleAddTag(event: FormEvent) {
     event.preventDefault();
@@ -42,15 +45,9 @@ export function ArticleCard({
   }
 
   return (
-    <li className="flex gap-4 rounded border border-black/10 p-4 dark:border-white/10">
-      {article.image_url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={article.image_url}
-          alt=""
-          className="hidden h-20 w-28 flex-shrink-0 rounded object-cover sm:block"
-        />
-      )}
+    <li
+      className={`flex gap-4 rounded border border-black/10 p-4 dark:border-white/10 ${accentBorder ? `border-l-4 ${accentBorder}` : ""}`}
+    >
       <div className="flex-1">
         <div className="mb-1 flex items-center gap-2 text-xs text-zinc-500">
           <span className="font-medium">{article.source.name}</span>

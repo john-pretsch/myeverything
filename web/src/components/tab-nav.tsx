@@ -7,12 +7,13 @@ import { getMarketOverview } from "@/lib/market";
 import { useAuth } from "@/lib/auth-context";
 
 const TABS = [
-  { href: "/news", label: "News Feed", requiresAuth: false },
-  { href: "/market", label: "Market Info", requiresAuth: false },
-  { href: "/todo", label: "Todo", requiresAuth: true },
-  { href: "/gig-leads", label: "Gig Leads", requiresAuth: true },
-  { href: "/weather", label: "Weather", requiresAuth: false },
-  { href: "/brainiac", label: "Brainiac", requiresAuth: true },
+  { href: "/news", label: "News Feed", requiresAuth: false, requiresAdmin: false },
+  { href: "/market", label: "Market Info", requiresAuth: false, requiresAdmin: false },
+  { href: "/todo", label: "Todo", requiresAuth: true, requiresAdmin: false },
+  { href: "/gig-leads", label: "Gig Leads", requiresAuth: true, requiresAdmin: false },
+  { href: "/weather", label: "Weather", requiresAuth: false, requiresAdmin: false },
+  { href: "/brainiac", label: "Brainiac", requiresAuth: true, requiresAdmin: false },
+  { href: "/admin", label: "Admin", requiresAuth: true, requiresAdmin: true },
 ] as const;
 
 function AuthControls({ onNavigate }: { onNavigate?: () => void }) {
@@ -117,6 +118,7 @@ function ForceRefreshButton() {
 
 export function TabNav() {
   const pathname = usePathname();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [lastPathname, setLastPathname] = useState(pathname);
 
@@ -125,11 +127,15 @@ export function TabNav() {
     setOpen(false);
   }
 
+  const visibleTabs = TABS.filter(
+    (tab) => !tab.requiresAdmin || user?.role === "admin",
+  );
+
   return (
     <nav className="border-b border-black/10 dark:border-white/10">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4">
         <ul className="hidden flex-wrap gap-1 md:flex">
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const active = pathname === tab.href;
             return (
               <li key={tab.href}>
@@ -191,7 +197,7 @@ export function TabNav() {
       {open && (
         <div className="border-t border-black/10 px-4 py-3 md:hidden dark:border-white/10">
           <ul className="flex flex-col gap-1">
-            {TABS.map((tab) => {
+            {visibleTabs.map((tab) => {
               const active = pathname === tab.href;
               return (
                 <li key={tab.href}>

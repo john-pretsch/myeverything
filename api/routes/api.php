@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\TopicController as AdminTopicController;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\SsoController;
 use App\Http\Controllers\BrainiacController;
@@ -8,6 +9,7 @@ use App\Http\Controllers\Market\MarketController;
 use App\Http\Controllers\News\FeedController;
 use App\Http\Controllers\News\SourceController;
 use App\Http\Controllers\News\TagController;
+use App\Http\Controllers\News\TopicController;
 use App\Http\Controllers\ResumeController;
 use App\Http\Controllers\ResumeTailoringController;
 use App\Http\Controllers\TodoController;
@@ -22,6 +24,7 @@ Route::prefix('news')->group(function () {
     Route::get('/sources', [SourceController::class, 'index']);
     Route::get('/feed', [FeedController::class, 'index']);
     Route::get('/tags', [TagController::class, 'index']);
+    Route::get('/topics', [TopicController::class, 'index']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/sources', [SourceController::class, 'store']);
@@ -35,6 +38,15 @@ Route::prefix('news')->group(function () {
         Route::post('/articles/{article}/tags', [TagController::class, 'attach']);
         Route::delete('/articles/{article}/tags/{tag}', [TagController::class, 'detach']);
     });
+});
+
+Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/topics')->group(function () {
+    Route::get('/', [AdminTopicController::class, 'index']);
+    Route::post('/', [AdminTopicController::class, 'store']);
+    Route::patch('/{topic}', [AdminTopicController::class, 'update']);
+    Route::delete('/{topic}', [AdminTopicController::class, 'destroy']);
+    Route::post('/{topic}/sources', [AdminTopicController::class, 'attachSource']);
+    Route::delete('/{topic}/sources/{source}', [AdminTopicController::class, 'detachSource']);
 });
 
 Route::get('/market/overview', [MarketController::class, 'overview']);

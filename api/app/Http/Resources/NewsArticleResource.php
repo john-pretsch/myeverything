@@ -19,6 +19,7 @@ class NewsArticleResource extends JsonResource
             'source' => [
                 'id' => $this->source->id,
                 'name' => $this->source->name,
+                'topics' => TopicResource::collection($this->source->topics),
             ],
             'tags' => $this->article_tags ?? [],
         ];

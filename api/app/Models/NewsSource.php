@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Database\Factories\NewsSourceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -11,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable(['name', 'site_url', 'feed_url'])]
 class NewsSource extends Model
 {
-    /** @use HasFactory<\Database\Factories\NewsSourceFactory> */
+    /** @use HasFactory<NewsSourceFactory> */
     use HasFactory;
 
     protected function casts(): array
@@ -31,6 +32,12 @@ class NewsSource extends Model
     {
         return $this->belongsToMany(User::class, 'news_source_user')
             ->withPivot('position')
+            ->withTimestamps();
+    }
+
+    public function topics(): BelongsToMany
+    {
+        return $this->belongsToMany(Topic::class, 'news_source_topic')
             ->withTimestamps();
     }
 }

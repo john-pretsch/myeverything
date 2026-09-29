@@ -15,7 +15,7 @@ class NewsSourceResource extends JsonResource
             'site_url' => $this->site_url,
             'feed_url' => $this->feed_url,
             'is_default' => $this->is_default,
-            'topic' => $this->topic,
+            'topics' => TopicResource::collection($this->whenLoaded('topics')),
             'is_added' => $this->added_position !== null,
             'position' => $this->added_position,
         ];

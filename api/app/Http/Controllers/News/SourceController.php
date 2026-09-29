@@ -13,7 +13,7 @@ class SourceController extends Controller
 {
     public function index(Request $request)
     {
-        $sources = NewsSource::orderBy('name')->get();
+        $sources = NewsSource::with('topics')->orderBy('name')->get();
 
         $positions = $request->user()
             ? DB::table('news_source_user')

@@ -65,4 +65,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(BrainiacAttempt::class);
     }
+
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
+    }
 }

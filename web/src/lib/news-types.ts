@@ -1,10 +1,13 @@
-export type NewsTopic = "local" | "hackery" | "world";
+export type Topic = {
+  id: number;
+  name: string;
+  source_count?: number;
+};
 
-export const NEWS_TOPICS: { value: NewsTopic; label: string }[] = [
-  { value: "local", label: "Local" },
-  { value: "hackery", label: "Hackery" },
-  { value: "world", label: "World" },
-];
+export type AdminTopic = Topic & {
+  source_count: number;
+  sources: { id: number; name: string }[];
+};
 
 export type NewsSource = {
   id: number;
@@ -12,7 +15,7 @@ export type NewsSource = {
   site_url: string;
   feed_url: string;
   is_default: boolean;
-  topic: NewsTopic | null;
+  topics: Topic[];
   is_added: boolean;
   position: number | null;
 };
@@ -31,6 +34,6 @@ export type NewsArticle = {
   summary: string | null;
   image_url: string | null;
   published_at: string | null;
-  source: { id: number; name: string };
+  source: { id: number; name: string; topics: Topic[] };
   tags: Tag[];
 };
