@@ -55,12 +55,16 @@ class FeedController extends Controller
             ? DB::table('tag_votes')->where('user_id', $user->id)->pluck('direction', 'tag_id')
             : collect();
 
-        $tagsByArticle = DB::table('news_article_tag')
-            ->join('tags', 'tags.id', '=', 'news_article_tag.tag_id')
-            ->whereIn('news_article_tag.news_article_id', $articles->pluck('id'))
-            ->select('news_article_tag.news_article_id', 'tags.id as tag_id', 'tags.name as tag_name')
-            ->get()
-            ->groupBy('news_article_id');
+        // Tags are per-user: each viewer only sees the tags they personally applied.
+        $tagsByArticle = $user
+            ? DB::table('news_article_tag')
+                ->join('tags', 'tags.id', '=', 'news_article_tag.tag_id')
+                ->where('news_article_tag.applied_by_user_id', $user->id)
+                ->whereIn('news_article_tag.news_article_id', $articles->pluck('id'))
+                ->select('news_article_tag.news_article_id', 'tags.id as tag_id', 'tags.name as tag_name')
+                ->get()
+                ->groupBy('news_article_id')
+            : collect();
 
         $articles = $articles
             ->sortByDesc(function (NewsArticle $article) use ($tagVotes, $tagsByArticle) {

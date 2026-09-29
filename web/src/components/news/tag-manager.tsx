@@ -25,7 +25,7 @@ export function TagManager({
 
   return (
     <div className="rounded border border-black/10 p-4 dark:border-white/10">
-      <p className="mb-2 text-sm font-medium">All tags</p>
+      <p className="mb-2 text-sm font-medium">Your tags</p>
       <ul className="flex flex-col gap-1">
         {visibleTags.map((tag) => (
           <li
@@ -42,7 +42,7 @@ export function TagManager({
             </span>
             <button
               type="button"
-              aria-label={`Delete tag ${tag.name}`}
+              aria-label={`Remove tag ${tag.name} from your articles`}
               onClick={() => onDelete(tag.id)}
               className="text-zinc-500 hover:text-red-600"
             >
@@ -51,7 +51,9 @@ export function TagManager({
           </li>
         ))}
         {visibleTags.length === 0 && (
-          <li className="text-sm text-zinc-500">No tags yet.</li>
+          <li className="text-sm text-zinc-500">
+            You haven&apos;t tagged anything yet.
+          </li>
         )}
       </ul>
     </div>
