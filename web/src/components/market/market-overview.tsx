@@ -211,7 +211,7 @@ export function MarketOverview() {
   useEffect(() => {
     let ignore = false;
 
-    getMarketOverview()
+    getMarketOverview(requestId > 0)
       .then((res) => {
         if (ignore) return;
         setData(res.data);

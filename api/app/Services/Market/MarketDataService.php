@@ -36,8 +36,15 @@ class MarketDataService
         ['symbol' => '^IXIC', 'name' => 'NASDAQ Composite', 'exchange' => 'NASDAQ'],
     ];
 
-    public function overview(): array
+    public function overview(bool $fresh = false): array
     {
+        if ($fresh) {
+            Cache::forget('market:currencies');
+            Cache::forget('market:crypto');
+            Cache::forget('market:indices');
+            Cache::forget('market:movers');
+        }
+
         return [
             'currencies' => $this->currencies(),
             'crypto' => $this->crypto(),
