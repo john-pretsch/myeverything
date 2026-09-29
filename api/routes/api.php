@@ -1,11 +1,8 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthController;
-use App\Http\Controllers\Auth\PasswordResetController;
 use App\Http\Controllers\Auth\SsoController;
-use App\Http\Controllers\Auth\TwoFactorAuthenticationController;
 use App\Http\Controllers\BrainiacController;
-use App\Http\Controllers\ConfigController;
 use App\Http\Controllers\GigLeadController;
 use App\Http\Controllers\Market\MarketController;
 use App\Http\Controllers\News\FeedbackController;
@@ -16,31 +13,9 @@ use App\Http\Controllers\ResumeTailoringController;
 use App\Http\Controllers\TodoController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/config', [ConfigController::class, 'index']);
-
-Route::post('/register', [AuthController::class, 'register']);
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/two-factor-challenge', [AuthController::class, 'twoFactorChallenge']);
-
-Route::get('/auth/sso/redirect', [SsoController::class, 'redirect']);
-Route::get('/auth/sso/callback', [SsoController::class, 'callback']);
-
-Route::post('/forgot-password', [PasswordResetController::class, 'forgotPassword'])
-    ->middleware('throttle:6,1');
-Route::post('/reset-password', [PasswordResetController::class, 'reset'])
-    ->middleware('throttle:10,1');
-
 Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::post('/logout', [SsoController::class, 'logout']);
     Route::get('/user', [AuthController::class, 'me']);
-
-    Route::middleware('feature:two_factor_auth')->prefix('user/two-factor-authentication')->group(function () {
-        Route::post('/', [TwoFactorAuthenticationController::class, 'store']);
-        Route::delete('/', [TwoFactorAuthenticationController::class, 'destroy']);
-        Route::post('/confirm', [TwoFactorAuthenticationController::class, 'confirm']);
-        Route::get('/recovery-codes', [TwoFactorAuthenticationController::class, 'recoveryCodes']);
-        Route::post('/recovery-codes', [TwoFactorAuthenticationController::class, 'regenerateRecoveryCodes']);
-    });
 });
 
 Route::prefix('news')->group(function () {

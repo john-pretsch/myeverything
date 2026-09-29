@@ -8,36 +8,21 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { apiFetch } from "./api";
+import { API_URL, apiFetch } from "./api";
 
 export type User = {
   id: number;
   name: string;
   email: string;
   role: string;
-  two_factor_enabled: boolean;
 };
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
-type LoginResult =
-  | { twoFactorRequired: false }
-  | { twoFactorRequired: true; loginToken: string };
-
 type AuthContextValue = {
   user: User | null;
   status: AuthStatus;
-  login: (email: string, password: string) => Promise<LoginResult>;
-  verifyTwoFactorLogin: (
-    loginToken: string,
-    input: { code?: string; recoveryCode?: string },
-  ) => Promise<void>;
-  register: (
-    name: string,
-    email: string,
-    password: string,
-    passwordConfirmation: string,
-  ) => Promise<void>;
+  login: () => void;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -81,68 +66,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const login = useCallback(
-    async (email: string, password: string): Promise<LoginResult> => {
-      const res = await apiFetch<{ two_factor_required?: boolean; login_token?: string }>(
-        "/api/login",
-        { method: "POST", body: { email, password } },
-      );
-
-      if (res.two_factor_required && res.login_token) {
-        return { twoFactorRequired: true, loginToken: res.login_token };
-      }
-
-      await refresh();
-      return { twoFactorRequired: false };
-    },
-    [refresh],
-  );
-
-  const verifyTwoFactorLogin = useCallback(
-    async (loginToken: string, input: { code?: string; recoveryCode?: string }) => {
-      await apiFetch("/api/two-factor-challenge", {
-        method: "POST",
-        body: {
-          login_token: loginToken,
-          code: input.code,
-          recovery_code: input.recoveryCode,
-        },
-      });
-      await refresh();
-    },
-    [refresh],
-  );
-
-  const register = useCallback(
-    async (
-      name: string,
-      email: string,
-      password: string,
-      passwordConfirmation: string,
-    ) => {
-      await apiFetch("/api/register", {
-        method: "POST",
-        body: {
-          name,
-          email,
-          password,
-          password_confirmation: passwordConfirmation,
-        },
-      });
-      await refresh();
-    },
-    [refresh],
-  );
+  const login = useCallback(() => {
+    window.location.href = `${API_URL}/api/auth/sso/redirect`;
+  }, []);
 
   const logout = useCallback(async () => {
-    await apiFetch("/api/logout", { method: "POST" });
+    const { redirect } = await apiFetch<{ redirect: string }>("/api/logout", { method: "POST" });
     setUser(null);
     setStatus("unauthenticated");
+    window.location.href = redirect;
   }, []);
 
   return (
     <AuthContext.Provider
-      value={{ user, status, login, verifyTwoFactorLogin, register, logout, refresh }}
+      value={{ user, status, login, logout, refresh }}
     >
       {children}
     </AuthContext.Provider>
