@@ -1,7 +1,8 @@
-export type NewsTopic = "local";
+export type NewsTopic = "local" | "hackery";
 
 export const NEWS_TOPICS: { value: NewsTopic; label: string }[] = [
   { value: "local", label: "Local" },
+  { value: "hackery", label: "Hackery" },
 ];
 
 export type NewsSource = {

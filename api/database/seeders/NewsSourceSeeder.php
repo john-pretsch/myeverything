@@ -59,6 +59,30 @@ class NewsSourceSeeder extends Seeder
                 'feed_url' => 'https://thelocal.to/feed/',
                 'topic' => 'local',
             ],
+            [
+                'name' => 'The Hacker News',
+                'site_url' => 'https://thehackernews.com',
+                'feed_url' => 'https://feeds.feedburner.com/TheHackersNews',
+                'topic' => 'hackery',
+            ],
+            [
+                'name' => 'BleepingComputer',
+                'site_url' => 'https://www.bleepingcomputer.com',
+                'feed_url' => 'https://www.bleepingcomputer.com/feed/',
+                'topic' => 'hackery',
+            ],
+            [
+                'name' => 'Dark Reading',
+                'site_url' => 'https://www.darkreading.com',
+                'feed_url' => 'https://www.darkreading.com/rss.xml',
+                'topic' => 'hackery',
+            ],
+            [
+                'name' => 'Krebs on Security',
+                'site_url' => 'https://krebsonsecurity.com',
+                'feed_url' => 'https://krebsonsecurity.com/feed/',
+                'topic' => 'hackery',
+            ],
         ];
 
         $newlyDefaulted = collect();
