@@ -12,7 +12,7 @@ import {
   reorderSources,
   sendArticleFeedback,
 } from "@/lib/news";
-import type { NewsArticle, NewsSource } from "@/lib/news-types";
+import { NEWS_TOPICS, type NewsArticle, type NewsSource } from "@/lib/news-types";
 import {
   addRecentSearch,
   clearRecentSearches,
@@ -31,6 +31,7 @@ export function NewsFeed() {
   const [resolvedId, setResolvedId] = useState(-1);
   const [searchQuery, setSearchQuery] = useState("");
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [topic, setTopic] = useState("");
   const loading = requestId !== resolvedId;
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export function NewsFeed() {
 
     let ignore = false;
 
-    Promise.all([getSources(), getFeed(50, searchQuery)])
+    Promise.all([getSources(), getFeed(50, searchQuery, topic)])
       .then(([sourcesData, articlesData]) => {
         if (ignore) return;
         setSources(sourcesData);
@@ -59,7 +60,7 @@ export function NewsFeed() {
     return () => {
       ignore = true;
     };
-  }, [status, requestId, searchQuery]);
+  }, [status, requestId, searchQuery, topic]);
 
   function reload() {
     setRequestId((n) => n + 1);
@@ -116,6 +117,33 @@ export function NewsFeed() {
     <div className="flex flex-col gap-6 lg:flex-row">
       <div className="flex-1">
         <h1 className="mb-4 text-xl font-semibold">News Feed</h1>
+        <div className="mb-4 flex gap-1">
+          <button
+            type="button"
+            onClick={() => setTopic("")}
+            className={`rounded px-3 py-1.5 text-sm font-medium ${
+              topic === ""
+                ? "bg-foreground text-background"
+                : "border border-black/10 text-zinc-500 dark:border-white/10"
+            }`}
+          >
+            All
+          </button>
+          {NEWS_TOPICS.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setTopic(t.value)}
+              className={`rounded px-3 py-1.5 text-sm font-medium ${
+                topic === t.value
+                  ? "bg-foreground text-background"
+                  : "border border-black/10 text-zinc-500 dark:border-white/10"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
         <NewsSearch
           query={searchQuery}
           recentSearches={recentSearches}

@@ -1,9 +1,16 @@
+export type NewsTopic = "local";
+
+export const NEWS_TOPICS: { value: NewsTopic; label: string }[] = [
+  { value: "local", label: "Local" },
+];
+
 export type NewsSource = {
   id: number;
   name: string;
   site_url: string;
   feed_url: string;
   is_default: boolean;
+  topic: NewsTopic | null;
   is_added: boolean;
   position: number | null;
 };

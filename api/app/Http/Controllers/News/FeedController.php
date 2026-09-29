@@ -19,10 +19,17 @@ class FeedController extends Controller
         $user = $request->user();
         $limit = min((int) $request->integer('limit', 50), 100);
         $query = trim((string) $request->string('q'));
+        $topic = trim((string) $request->string('topic'));
 
-        $sourceIds = $user
-            ? $user->newsSources()->pluck('news_sources.id')
-            : NewsSource::where('is_default', true)->pluck('id');
+        $sources = $user
+            ? $user->newsSources()
+            : NewsSource::where('is_default', true);
+
+        if ($topic !== '') {
+            $sources->where('topic', $topic);
+        }
+
+        $sourceIds = $user ? $sources->pluck('news_sources.id') : $sources->pluck('id');
 
         if ($sourceIds->isEmpty()) {
             return NewsArticleResource::collection(collect());
