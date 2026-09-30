@@ -7,6 +7,7 @@ use App\Http\Resources\NewsArticleResource;
 use App\Models\NewsArticle;
 use App\Models\NewsSource;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class FeedController extends Controller
@@ -77,8 +78,18 @@ class FeedController extends Controller
 
                 return $published + $boost * self::AFFINITY_HOURS * 3600;
             })
-            ->values()
-            ->take($limit);
+            ->values();
+
+        // With no topic filter, round-robin one article per topic (in
+        // relevance order within each topic) instead of a straight merge,
+        // so a fast-publishing topic can't dominate a run of consecutive
+        // articles. Interleave before truncating to $limit so mixing
+        // holds across the whole visible window, not just a pre-cut slice.
+        if (! $topicId) {
+            $articles = $this->interleaveByTopic($articles);
+        }
+
+        $articles = $articles->take($limit);
 
         $articles->each(function (NewsArticle $article) use ($tagVotes, $tagsByArticle) {
             $article->article_tags = ($tagsByArticle->get($article->id) ?? collect())
@@ -92,5 +103,47 @@ class FeedController extends Controller
         });
 
         return NewsArticleResource::collection($articles);
+    }
+
+    /**
+     * Groups already-ranked articles by their primary topic (or a "no
+     * topic" bucket) and round-robins across the buckets, preserving each
+     * bucket's internal order — so consecutive articles alternate topics
+     * instead of clumping, until the shorter buckets run out.
+     *
+     * @param  Collection<int, NewsArticle>  $articles
+     * @return Collection<int, NewsArticle>
+     */
+    private function interleaveByTopic($articles)
+    {
+        $buckets = [];
+        $bucketOrder = [];
+
+        foreach ($articles as $article) {
+            $key = $article->source->topics->first()?->id ?? 0;
+
+            if (! isset($buckets[$key])) {
+                $buckets[$key] = [];
+                $bucketOrder[] = $key;
+            }
+
+            $buckets[$key][] = $article;
+        }
+
+        $result = [];
+        $remaining = true;
+
+        while ($remaining) {
+            $remaining = false;
+
+            foreach ($bucketOrder as $key) {
+                if (! empty($buckets[$key])) {
+                    $result[] = array_shift($buckets[$key]);
+                    $remaining = true;
+                }
+            }
+        }
+
+        return collect($result);
     }
 }

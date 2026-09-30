@@ -102,6 +102,41 @@ class NewsSourceSeeder extends Seeder
                 'site_url' => 'https://theintercept.com',
                 'feed_url' => 'https://theintercept.com/feed/',
             ],
+            [
+                'name' => 'CNBC',
+                'site_url' => 'https://www.cnbc.com',
+                'feed_url' => 'https://www.cnbc.com/id/100003114/device/rss/rss.html',
+            ],
+            [
+                'name' => 'Investing.com',
+                'site_url' => 'https://www.investing.com',
+                'feed_url' => 'https://www.investing.com/rss/news.rss',
+            ],
+            [
+                'name' => 'The Block',
+                'site_url' => 'https://www.theblock.co',
+                'feed_url' => 'https://www.theblock.co/rss.xml',
+            ],
+            [
+                'name' => 'CoinDesk',
+                'site_url' => 'https://www.coindesk.com',
+                'feed_url' => 'https://www.coindesk.com/arc/outboundfeeds/rss/',
+            ],
+            [
+                'name' => 'CryptoSlate',
+                'site_url' => 'https://cryptoslate.com',
+                'feed_url' => 'https://cryptoslate.com/feed/',
+            ],
+            [
+                'name' => 'Forbes',
+                'site_url' => 'https://www.forbes.com',
+                'feed_url' => 'https://www.forbes.com/business/feed/',
+            ],
+            [
+                'name' => 'MarketWatch',
+                'site_url' => 'https://www.marketwatch.com',
+                'feed_url' => 'https://feeds.content.dowjones.io/public/rss/mw_topstories',
+            ],
         ];
 
         $newlyDefaulted = collect();
@@ -129,6 +164,7 @@ class NewsSourceSeeder extends Seeder
             'Local' => ['Bay Observer', 'Hamilton Independent', 'The Local'],
             'Hackery' => ['The Hacker News', 'BleepingComputer', 'Dark Reading', 'Krebs on Security'],
             'World' => ['Bellingcat', 'ICIJ', 'OCCRP', 'Democracy Now', 'ProPublica', 'The Intercept'],
+            'Fin' => ['CNBC', 'Investing.com', 'The Block', 'CoinDesk', 'CryptoSlate', 'Forbes', 'WSJ', 'MarketWatch'],
         ];
 
         foreach ($topicAssignments as $topicName => $sourceNames) {

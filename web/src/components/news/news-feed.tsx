@@ -235,6 +235,7 @@ export function NewsFeed() {
                 key={article.id}
                 article={article}
                 canTag={status === "authenticated"}
+                showTopicDot={topicId === null}
                 onApplyTag={handleApplyTag}
                 onDetachTag={handleDetachTag}
                 onVoteTag={handleVoteTag}

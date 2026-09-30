@@ -16,12 +16,14 @@ function formatPublished(published_at: string | null): string {
 export function ArticleCard({
   article,
   canTag,
+  showTopicDot,
   onApplyTag,
   onDetachTag,
   onVoteTag,
 }: {
   article: NewsArticle;
   canTag: boolean;
+  showTopicDot: boolean;
   onApplyTag: (articleId: number, name: string) => Promise<void>;
   onDetachTag: (articleId: number, tagId: number) => void;
   onVoteTag: (tagId: number, direction: 1 | -1) => void;
@@ -50,6 +52,13 @@ export function ArticleCard({
     >
       <div className="flex-1">
         <div className="mb-1 flex items-center gap-2 text-xs text-zinc-500">
+          {showTopicDot && primaryTopic && (
+            <span
+              aria-label={`Topic: ${primaryTopic.name}`}
+              title={primaryTopic.name}
+              className={`h-2 w-2 flex-shrink-0 rounded-full ${topicColor(primaryTopic.id).dot}`}
+            />
+          )}
           <span className="font-medium">{article.source.name}</span>
           {article.published_at && (
             <span>{formatPublished(article.published_at)}</span>
