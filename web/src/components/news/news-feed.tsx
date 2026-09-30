@@ -49,6 +49,7 @@ export function NewsFeed() {
   const [selectedSourceId, setSelectedSourceId] = useState<number | null>(
     null,
   );
+  const [selectedTagId, setSelectedTagId] = useState<number | null>(null);
   const loading = requestId !== resolvedId;
 
   useEffect(() => {
@@ -62,7 +63,7 @@ export function NewsFeed() {
 
     Promise.all([
       getSources(),
-      getFeed(50, searchQuery, topicId, selectedSourceId),
+      getFeed(50, searchQuery, topicId, selectedSourceId, selectedTagId),
       getTags(),
       getTopics(),
     ])
@@ -84,7 +85,7 @@ export function NewsFeed() {
     return () => {
       ignore = true;
     };
-  }, [status, requestId, searchQuery, topicId, selectedSourceId]);
+  }, [status, requestId, searchQuery, topicId, selectedSourceId, selectedTagId]);
 
   function reload() {
     setRequestId((n) => n + 1);
@@ -150,6 +151,11 @@ export function NewsFeed() {
           : a,
       ),
     );
+  }
+
+  function handleSelectTag(tagId: number | null) {
+    setSelectedTagId(tagId);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function handleDeleteTag(tagId: number) {
@@ -219,6 +225,19 @@ export function NewsFeed() {
             </button>
           </p>
         )}
+        {selectedTagId !== null && (
+          <p className="mb-4 text-sm text-zinc-500">
+            Showing articles tagged{" "}
+            {tags.find((t) => t.id === selectedTagId)?.name ?? "this tag"}.{" "}
+            <button
+              type="button"
+              onClick={() => setSelectedTagId(null)}
+              className="font-medium underline"
+            >
+              Clear
+            </button>
+          </p>
+        )}
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
         {loading ? (
           <p className="text-sm text-zinc-500">Loading...</p>
@@ -261,6 +280,8 @@ export function NewsFeed() {
             <TagManager
               tags={tags}
               canManage={status === "authenticated"}
+              selectedTagId={selectedTagId}
+              onSelectTag={handleSelectTag}
               onDelete={handleDeleteTag}
             />
           </>

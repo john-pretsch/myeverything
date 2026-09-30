@@ -11,11 +11,13 @@ export async function getFeed(
   q = "",
   topicId: number | null = null,
   sourceId: number | null = null,
+  tagId: number | null = null,
 ): Promise<NewsArticle[]> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (q.trim() !== "") params.set("q", q.trim());
   if (topicId !== null) params.set("topic", String(topicId));
   if (sourceId !== null) params.set("source", String(sourceId));
+  if (tagId !== null) params.set("tag", String(tagId));
   const res = await apiFetch<{ data: NewsArticle[] }>(
     `/api/news/feed?${params.toString()}`,
   );

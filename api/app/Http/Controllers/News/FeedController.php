@@ -22,6 +22,7 @@ class FeedController extends Controller
         $query = trim((string) $request->string('q'));
         $topicId = $request->integer('topic');
         $sourceId = $request->integer('source');
+        $tagId = $request->integer('tag');
 
         $sources = $user
             ? $user->newsSources()
@@ -43,6 +44,10 @@ class FeedController extends Controller
 
         $articlesQuery = NewsArticle::with('source.topics')
             ->whereIn('news_source_id', $sourceIds);
+
+        if ($tagId) {
+            $articlesQuery->whereHas('tags', fn ($q) => $q->where('tags.id', $tagId));
+        }
 
         if ($query !== '') {
             $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $query);
