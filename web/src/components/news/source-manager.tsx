@@ -30,6 +30,13 @@ export function SourceManager({
   const [customFeedUrl, setCustomFeedUrl] = useState("");
   const [customError, setCustomError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showAddPanel, setShowAddPanel] = useState(false);
+
+  function handleRemove(source: NewsSource) {
+    if (window.confirm(`Remove ${source.name} from your sources?`)) {
+      onRemove(source.id);
+    }
+  }
 
   if (!canManage) {
     return (
@@ -95,7 +102,16 @@ export function SourceManager({
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded border border-black/10 p-4 dark:border-white/10">
-        <p className="mb-2 text-sm font-medium">Your sources</p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm font-medium">Your sources</p>
+          <button
+            type="button"
+            onClick={() => setShowAddPanel((v) => !v)}
+            className="text-sm font-medium text-foreground hover:underline"
+          >
+            {showAddPanel ? "Close" : "+ Add source"}
+          </button>
+        </div>
         <ul className="flex flex-col gap-1">
           {addedSources.map((source, index) => (
             <li
@@ -139,7 +155,7 @@ export function SourceManager({
                 <button
                   type="button"
                   aria-label={`Remove ${source.name}`}
-                  onClick={() => onRemove(source.id)}
+                  onClick={() => handleRemove(source)}
                   className="ml-1 text-zinc-500 hover:text-red-600"
                 >
                   ×
@@ -153,63 +169,63 @@ export function SourceManager({
         </ul>
       </div>
 
-      {catalogSources.length > 0 && (
-        <div className="rounded border border-black/10 p-4 dark:border-white/10">
-          <p className="mb-2 text-sm font-medium">Add a source</p>
-          <ul className="flex flex-col gap-1">
-            {catalogSources.map((source) => (
-              <li
-                key={source.id}
-                className="flex items-center justify-between gap-2 text-sm"
-              >
-                <span>{source.name}</span>
-                <button
-                  type="button"
-                  onClick={() => onAddExisting(source.id)}
-                  className="text-zinc-500 hover:text-foreground"
-                >
-                  Add
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <form
-        onSubmit={handleAddCustom}
-        className="rounded border border-black/10 p-4 dark:border-white/10"
-      >
-        <p className="mb-2 text-sm font-medium">Add a custom RSS source</p>
-        <div className="flex flex-col gap-2">
-          <input
-            type="text"
-            placeholder="Name"
-            required
-            value={customName}
-            onChange={(e) => setCustomName(e.target.value)}
-            className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
-          />
-          <input
-            type="url"
-            placeholder="Feed URL"
-            required
-            value={customFeedUrl}
-            onChange={(e) => setCustomFeedUrl(e.target.value)}
-            className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
-          />
-          {customError && (
-            <p className="text-xs text-red-600">{customError}</p>
+      {showAddPanel && (
+        <>
+          {catalogSources.length > 0 && (
+            <div className="rounded border border-black/10 p-4 dark:border-white/10">
+              <p className="mb-2 text-sm font-medium">Catalog sources</p>
+              <ul className="flex flex-col gap-1">
+                {catalogSources.map((source) => (
+                  <li key={source.id} className="text-sm">
+                    <button
+                      type="button"
+                      onClick={() => onAddExisting(source.id)}
+                      className="cursor-pointer text-zinc-500 hover:text-foreground"
+                    >
+                      {source.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="self-start rounded bg-foreground px-3 py-1 text-sm font-medium text-background disabled:opacity-50"
+
+          <form
+            onSubmit={handleAddCustom}
+            className="rounded border border-black/10 p-4 dark:border-white/10"
           >
-            Add source
-          </button>
-        </div>
-      </form>
+            <p className="mb-2 text-sm font-medium">Add a custom RSS source</p>
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                placeholder="Name"
+                required
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+              />
+              <input
+                type="url"
+                placeholder="Feed URL"
+                required
+                value={customFeedUrl}
+                onChange={(e) => setCustomFeedUrl(e.target.value)}
+                className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+              />
+              {customError && (
+                <p className="text-xs text-red-600">{customError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={submitting}
+                className="self-start rounded bg-foreground px-3 py-1 text-sm font-medium text-background disabled:opacity-50"
+              >
+                Add source
+              </button>
+            </div>
+          </form>
+        </>
+      )}
     </div>
   );
 }
