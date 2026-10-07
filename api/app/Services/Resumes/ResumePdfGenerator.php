@@ -44,18 +44,23 @@ class ResumePdfGenerator
      */
     public function generate(string $text): string
     {
+        return $this->renderHtml($this->toHtml($text));
+    }
+
+    public function renderHtml(string $html): string
+    {
         $options = new Options();
         $options->set('isRemoteEnabled', false);
 
         $dompdf = new Dompdf($options);
-        $dompdf->loadHtml($this->toHtml($text));
+        $dompdf->loadHtml($html);
         $dompdf->setPaper('letter');
         $dompdf->render();
 
         return $dompdf->output();
     }
 
-    private function toHtml(string $text): string
+    public function toHtml(string $text, ?string $imageSrc = null): string
     {
         $lines = explode("\n", $text);
         $html = [];
@@ -102,7 +107,7 @@ class ResumePdfGenerator
             $afterBlank = false;
         }
 
-        $body = implode('', $html);
+        $body = ($imageSrc ? '<img class="profile-photo" src="'.e($imageSrc).'" alt="Profile image">' : '').implode('', $html);
         $bodySize = self::BODY_FONT_SIZE;
         $headingSize = self::BODY_FONT_SIZE + 2;
 
@@ -120,6 +125,7 @@ class ResumePdfGenerator
                     .heading { font-weight: bold; font-size: {$headingSize}pt; margin-top: 8pt; }
                     .job-title { font-weight: bold; margin-top: 4pt; }
                     .spacer { height: 6pt; }
+                    .profile-photo { width: 160px; height: 160px; float: right; }
                 </style>
             </head>
             <body>{$body}</body>

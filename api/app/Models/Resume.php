@@ -16,6 +16,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'organization_id',
     'gig_lead_id',
     'source_resume_id',
+    'alt_path',
+    'alt_mime_type',
+    'alt_size',
     'is_primary',
 ])]
 class Resume extends Model
@@ -41,6 +44,28 @@ class Resume extends Model
     public function gigLead(): BelongsTo
     {
         return $this->belongsTo(GigLead::class);
+    }
+
+    /**
+     * The format ('pdf' or 'html') this resume can still be converted to, or
+     * null if it already has a counterpart or its type isn't convertible.
+     */
+    public function convertibleTo(): ?string
+    {
+        if ($this->alt_path !== null) {
+            return null;
+        }
+
+        return match ($this->mime_type) {
+            'text/html' => 'pdf',
+            'application/pdf', 'text/plain' => 'html',
+            default => null,
+        };
+    }
+
+    public function hasHtmlVersion(): bool
+    {
+        return $this->mime_type === 'text/html' || $this->alt_mime_type === 'text/html';
     }
 
     public function sourceResume(): BelongsTo

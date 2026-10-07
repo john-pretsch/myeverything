@@ -83,6 +83,7 @@ Route::middleware('auth:sanctum')->prefix('resumes')->group(function () {
     Route::post('/', [ResumeController::class, 'store']);
     Route::post('/profile-image', [ResumeController::class, 'storeProfileImage']);
     Route::get('/{resume}/download', [ResumeController::class, 'download']);
+    Route::post('/{resume}/convert', [ResumeController::class, 'convert']);
     Route::patch('/{resume}/primary', [ResumeController::class, 'makePrimary']);
     Route::delete('/{resume}', [ResumeController::class, 'destroy']);
 });

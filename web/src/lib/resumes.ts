@@ -56,6 +56,10 @@ export async function uploadProfileImage(file: File): Promise<void> {
   });
 }
 
+export async function convertResume(id: number): Promise<void> {
+  await apiFetch<unknown>(`/api/resumes/${id}/convert`, { method: "POST" });
+}
+
 export async function makeResumePrimary(id: number): Promise<void> {
   await apiFetch<unknown>(`/api/resumes/${id}/primary`, { method: "PATCH" });
 }

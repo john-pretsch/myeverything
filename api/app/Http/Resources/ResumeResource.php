@@ -19,20 +19,28 @@ class ResumeResource extends JsonResource
             'content' => $this->content,
             'organization' => $this->organization?->name,
             'gig_lead_id' => $this->gig_lead_id,
+            'convertible_to' => $this->convertibleTo(),
             'is_primary' => $this->is_primary,
             'profile_image_url' => $this->profileImageUrl(),
-            'view_url' => URL::temporarySignedRoute(
-                'resumes.view-signed',
-                now()->addMinutes(5),
-                ['resume' => $this->id],
-            ),
+            'views' => collect([
+                [$this->mime_type, null],
+                [$this->alt_mime_type, 'alt'],
+            ])->filter(fn ($v) => in_array($v[0], ['application/pdf', 'text/html'], true))
+                ->map(fn ($v) => [
+                    'format' => $v[0] === 'text/html' ? 'html' : 'pdf',
+                    'url' => URL::temporarySignedRoute(
+                        'resumes.view-signed',
+                        now()->addMinutes(5),
+                        array_filter(['resume' => $this->id, 'version' => $v[1]]),
+                    ),
+                ])->values(),
             'uploaded_at' => $this->created_at->toIso8601String(),
         ];
     }
 
     private function profileImageUrl(): ?string
     {
-        if ($this->mime_type !== 'text/html') {
+        if (! $this->hasHtmlVersion()) {
             return null;
         }
 

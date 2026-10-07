@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Http\Resources\ResumeResource;
 use App\Models\Resume;
 use App\Services\Resumes\ProfileImageProcessor;
+use App\Services\Resumes\ResumeImageRewriter;
+use App\Services\Resumes\ResumePdfGenerator;
 use App\Services\Resumes\ResumeTextExtractor;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -86,26 +88,31 @@ class ResumeController extends Controller
      * header for Sanctum's stateful-request detection to key off of — the
      * signature itself is the authorization here, not the session cookie.
      */
-    public function viewSigned(Request $request, Resume $resume)
+    public function viewSigned(Request $request, Resume $resume, ResumeImageRewriter $images)
     {
-        $headers = ['Content-Type' => $resume->mime_type];
+        $alt = $request->query('version') === 'alt' && $resume->alt_path !== null;
+        $path = $alt ? $resume->alt_path : $resume->path;
+        $mime = $alt ? $resume->alt_mime_type : $resume->mime_type;
+        $filename = $alt
+            ? pathinfo($resume->original_filename, PATHINFO_FILENAME).'.'.($mime === 'text/html' ? 'html' : 'pdf')
+            : $resume->original_filename;
 
-        if ($resume->mime_type === 'text/html') {
+        $headers = ['Content-Type' => $mime];
+
+        if ($mime === 'text/html') {
             // User-supplied HTML served from the API origin: no scripts, no
             // network fetches beyond inline styles and images.
             $headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:";
             $headers['X-Content-Type-Options'] = 'nosniff';
-        }
 
-        if ($resume->mime_type === 'text/html') {
             return response(
-                $this->rewriteImages(Storage::disk('local')->get($resume->path), $resume->user_id),
+                $images->rewrite(Storage::disk('local')->get($path), $resume->user_id),
                 200,
                 $headers,
             );
         }
 
-        return Storage::disk('local')->response($resume->path, $resume->original_filename, $headers);
+        return Storage::disk('local')->response($path, $filename, $headers);
     }
 
     public function makePrimary(Request $request, Resume $resume)
@@ -121,41 +128,56 @@ class ResumeController extends Controller
     }
 
     /**
-     * Point relative <img src> values at images in public/assets/images.
-     * `profile.*` maps to the owner's uploaded profile image; any other
-     * relative name is used only if a file of that name exists there.
+     * Add the missing PDF or HTML version to a resume (stored on the same row): HTML → PDF
+     * renders the stored HTML; PDF/text → HTML renders the extracted text.
      */
-    private function rewriteImages(string $html, int $userId): string
-    {
-        return preg_replace_callback(
-            '/(<img\b[^>]*?\bsrc=)(["\'])([^"\']+)\2/i',
-            function (array $m) use ($userId) {
-                $src = $m[3];
+    public function convert(
+        Request $request,
+        Resume $resume,
+        ResumePdfGenerator $generator,
+        ResumeImageRewriter $images,
+    ) {
+        $this->authorize('update', $resume);
 
-                if (preg_match('#^([a-z][a-z0-9+.-]*:|//|/|data:)#i', $src)) {
-                    return $m[0];
-                }
+        $target = $resume->convertibleTo();
 
-                $name = basename($src);
-                $file = preg_match('/^profile\.(png|jpe?g)$/i', $name)
-                    ? ProfileImageProcessor::filenameFor($userId)
-                    : $name;
+        if ($target === null) {
+            return response()->json(['message' => 'This resume already has another version.'], 422);
+        }
 
-                if (! is_file(ProfileImageProcessor::directory().'/'.$file)) {
-                    return $m[0];
-                }
+        $userId = $request->user()->id;
 
-                return $m[1].$m[2].url('/api/assets/images/'.rawurlencode($file)).$m[2];
-            },
-            $html,
-        ) ?? $html;
+        if ($target === 'pdf') {
+            $html = preg_replace('/<img\b[^>]*>/i', '', Storage::disk('local')->get($resume->path));
+            $contents = $generator->renderHtml($html);
+            $mime = 'application/pdf';
+        } else {
+            if (! $resume->content) {
+                return response()->json(['message' => 'No text available to build an HTML version from.'], 422);
+            }
+
+            $hasImage = is_file(ProfileImageProcessor::directory().'/'.ProfileImageProcessor::filenameFor($userId));
+            $contents = $generator->toHtml($resume->content, $hasImage ? 'profile.png' : null);
+            $mime = 'text/html';
+        }
+
+        $path = 'resumes/'.$userId.'/'.Str::uuid().'.'.$target;
+        Storage::disk('local')->put($path, $contents);
+
+        $resume->update([
+            'alt_path' => $path,
+            'alt_mime_type' => $mime,
+            'alt_size' => strlen($contents),
+        ]);
+
+        return new ResumeResource($resume);
     }
 
     public function destroy(Request $request, Resume $resume)
     {
         $this->authorize('delete', $resume);
 
-        Storage::disk('local')->delete($resume->path);
+        Storage::disk('local')->delete(array_filter([$resume->path, $resume->alt_path]));
         $resume->delete();
 
         return response()->noContent();

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { ApiError } from "@/lib/api";
 import {
+  convertResume,
   deleteResume,
   getResumes,
   makeResumePrimary,
@@ -36,6 +37,7 @@ export function ResumesSection() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const htmlInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const [convertingId, setConvertingId] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   function reload() {
@@ -86,6 +88,19 @@ export function ResumesSection() {
       setError(errorMessage(err));
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleConvert(id: number) {
+    setConvertingId(id);
+    setError(null);
+    try {
+      await convertResume(id);
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setConvertingId(null);
     }
   }
 
@@ -172,7 +187,7 @@ export function ResumesSection() {
               className="rounded border border-black/10 p-2 dark:border-white/10"
             >
               <div className="flex items-center justify-between gap-3">
-                {resume.mime_type === "text/html" && (
+                {resume.views.some((v) => v.format === "html") && (
                   <div className="flex shrink-0 flex-col items-center gap-1">
                     {resume.profile_image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -217,25 +232,28 @@ export function ResumesSection() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3 text-xs text-zinc-500">
-                  {resume.mime_type === "application/pdf" && (
+                  {resume.views.map((view) => (
                     <a
-                      href={resume.view_url}
+                      key={view.format}
+                      href={view.url}
                       target="_blank"
                       rel="noopener"
                       className="hover:text-foreground"
                     >
-                      View PDF
+                      View {view.format.toUpperCase()}
                     </a>
-                  )}
-                  {resume.mime_type === "text/html" && (
-                    <a
-                      href={resume.view_url}
-                      target="_blank"
-                      rel="noopener"
-                      className="hover:text-foreground"
+                  ))}
+                  {resume.convertible_to && (
+                    <button
+                      type="button"
+                      onClick={() => handleConvert(resume.id)}
+                      disabled={convertingId === resume.id}
+                      className="hover:text-foreground disabled:opacity-50"
                     >
-                      View HTML
-                    </a>
+                      {convertingId === resume.id
+                        ? "Creating..."
+                        : `Create ${resume.convertible_to.toUpperCase()} version`}
+                    </button>
                   )}
                   {!resume.is_primary && (
                     <button

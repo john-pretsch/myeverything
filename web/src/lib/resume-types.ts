@@ -6,8 +6,9 @@ export type Resume = {
   content: string | null;
   organization: string | null;
   gig_lead_id: number | null;
+  convertible_to: "pdf" | "html" | null;
   is_primary: boolean;
   profile_image_url: string | null;
-  view_url: string;
+  views: { format: "pdf" | "html"; url: string }[];
   uploaded_at: string;
 };
