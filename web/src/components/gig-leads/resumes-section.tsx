@@ -5,7 +5,9 @@ import { ApiError } from "@/lib/api";
 import {
   deleteResume,
   getResumes,
+  makeResumePrimary,
   resumeDownloadUrl,
+  uploadProfileImage,
   uploadResume,
 } from "@/lib/resumes";
 import type { Resume } from "@/lib/resume-types";
@@ -32,6 +34,9 @@ export function ResumesSection() {
   const [uploading, setUploading] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const htmlInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   function reload() {
     setLoading(true);
@@ -65,6 +70,34 @@ export function ResumesSection() {
     }
   }
 
+  async function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setUploading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await uploadProfileImage(file);
+      setNotice("Profile image saved.");
+      reload();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleMakePrimary(id: number) {
+    try {
+      await makeResumePrimary(id);
+      setResumes((prev) => prev.map((r) => ({ ...r, is_primary: r.id === id })));
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
   async function handleDelete(id: number) {
     try {
       await deleteResume(id);
@@ -78,12 +111,29 @@ export function ResumesSection() {
     <div className="rounded border border-black/10 p-4 text-sm dark:border-white/10">
       <p className="font-medium">Resumes</p>
       <p className="mt-1 text-zinc-500">
-        Upload PDF or plain text resumes to keep on hand.
+        Upload PDF, HTML, or plain text resumes to keep on hand.
       </p>
 
       {error && <p className="mt-2 text-red-600">{error}</p>}
+      {notice && <p className="mt-2 text-green-600">{notice}</p>}
 
-      <div className="mt-3">
+      <div className="mt-3 flex gap-2">
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+          onChange={handleImageChange}
+          disabled={uploading}
+          className="hidden"
+        />
+        <input
+          ref={htmlInputRef}
+          type="file"
+          accept=".html,.htm,text/html"
+          onChange={handleFileChange}
+          disabled={uploading}
+          className="hidden"
+        />
         <input
           ref={fileInputRef}
           type="file"
@@ -100,6 +150,14 @@ export function ResumesSection() {
         >
           {uploading ? "Uploading..." : "Upload resume"}
         </button>
+        <button
+          type="button"
+          onClick={() => htmlInputRef.current?.click()}
+          disabled={uploading}
+          className="rounded border border-black/10 px-3 py-1 text-sm font-medium disabled:opacity-50 dark:border-white/10"
+        >
+          Add HTML resume
+        </button>
       </div>
 
       {loading ? (
@@ -114,13 +172,44 @@ export function ResumesSection() {
               className="rounded border border-black/10 p-2 dark:border-white/10"
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
+                {resume.mime_type === "text/html" && (
+                  <div className="flex shrink-0 flex-col items-center gap-1">
+                    {resume.profile_image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={resume.profile_image_url}
+                        alt="Profile image"
+                        width={48}
+                        height={48}
+                        className="h-12 w-12 rounded object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-12 w-12 items-center justify-center rounded bg-black/5 text-[10px] text-zinc-500 dark:bg-white/10">
+                        No image
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => imageInputRef.current?.click()}
+                      disabled={uploading}
+                      className="text-[10px] text-zinc-500 hover:text-foreground disabled:opacity-50"
+                    >
+                      {resume.profile_image_url ? "Change" : "Upload"} profile image
+                    </button>
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
                   <a
                     href={resumeDownloadUrl(resume.id)}
                     className="truncate font-medium hover:underline"
                   >
                     {resume.filename}
                   </a>
+                  {resume.is_primary && (
+                    <span className="ml-2 rounded bg-foreground px-1.5 py-0.5 text-xs text-background">
+                      Primary
+                    </span>
+                  )}
                   <p className="text-xs text-zinc-500">
                     {formatSize(resume.size)} ·{" "}
                     {new Date(resume.uploaded_at).toLocaleString()}
@@ -137,6 +226,25 @@ export function ResumesSection() {
                     >
                       View PDF
                     </a>
+                  )}
+                  {resume.mime_type === "text/html" && (
+                    <a
+                      href={resume.view_url}
+                      target="_blank"
+                      rel="noopener"
+                      className="hover:text-foreground"
+                    >
+                      View HTML
+                    </a>
+                  )}
+                  {!resume.is_primary && (
+                    <button
+                      type="button"
+                      onClick={() => handleMakePrimary(resume.id)}
+                      className="hover:text-foreground"
+                    >
+                      Make primary
+                    </button>
                   )}
                   <button
                     type="button"

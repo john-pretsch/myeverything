@@ -81,7 +81,9 @@ Route::middleware('auth:sanctum')->prefix('gig-leads')->group(function () {
 Route::middleware('auth:sanctum')->prefix('resumes')->group(function () {
     Route::get('/', [ResumeController::class, 'index']);
     Route::post('/', [ResumeController::class, 'store']);
+    Route::post('/profile-image', [ResumeController::class, 'storeProfileImage']);
     Route::get('/{resume}/download', [ResumeController::class, 'download']);
+    Route::patch('/{resume}/primary', [ResumeController::class, 'makePrimary']);
     Route::delete('/{resume}', [ResumeController::class, 'destroy']);
 });
 
@@ -90,3 +92,5 @@ Route::middleware('auth:sanctum')->prefix('resumes')->group(function () {
 Route::get('/resumes/{resume}/view-signed', [ResumeController::class, 'viewSigned'])
     ->middleware('signed')
     ->name('resumes.view-signed');
+
+Route::get('/assets/images/{filename}', [ResumeController::class, 'image']);

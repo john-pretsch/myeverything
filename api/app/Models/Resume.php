@@ -16,11 +16,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'organization_id',
     'gig_lead_id',
     'source_resume_id',
+    'is_primary',
 ])]
 class Resume extends Model
 {
     /** @use HasFactory<\Database\Factories\ResumeFactory> */
     use HasFactory;
+
+    protected function casts(): array
+    {
+        return ['is_primary' => 'boolean'];
+    }
 
     public function user(): BelongsTo
     {
