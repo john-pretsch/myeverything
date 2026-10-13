@@ -151,7 +151,7 @@ export function GigLeadList() {
 
   return (
     <div>
-      <h1 className="mb-4 text-xl font-semibold">Gig Leads</h1>
+      <h1 className="mb-4 text-xl font-semibold">Leads</h1>
 
       <div className="mb-4">
         <GigLeadForm onSubmit={handleCreate} />

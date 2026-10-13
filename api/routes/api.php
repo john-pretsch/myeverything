@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\Auth\SsoController;
 use App\Http\Controllers\BrainiacController;
 use App\Http\Controllers\GigLeadController;
+use App\Http\Controllers\InterviewController;
 use App\Http\Controllers\Market\MarketController;
 use App\Http\Controllers\News\FeedController;
 use App\Http\Controllers\News\SourceController;
@@ -66,6 +67,14 @@ Route::middleware('auth:sanctum')->prefix('brainiac')->group(function () {
     Route::get('/attempts/{attempt}', [BrainiacController::class, 'show']);
     Route::post('/attempts/{attempt}/answers', [BrainiacController::class, 'answer']);
     Route::post('/attempts/{attempt}/complete', [BrainiacController::class, 'complete']);
+});
+
+Route::middleware('auth:sanctum')->prefix('interview')->group(function () {
+    Route::get('/categories', [InterviewController::class, 'categories']);
+    Route::get('/questions', [InterviewController::class, 'index']);
+    Route::post('/questions', [InterviewController::class, 'store']);
+    Route::patch('/questions/{question}', [InterviewController::class, 'update']);
+    Route::delete('/questions/{question}', [InterviewController::class, 'destroy']);
 });
 
 Route::middleware('auth:sanctum')->prefix('gig-leads')->group(function () {

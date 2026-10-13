@@ -51,6 +51,11 @@ class User extends Authenticatable
         return $this->hasMany(GigLead::class);
     }
 
+    public function interviewQuestions(): HasMany
+    {
+        return $this->hasMany(InterviewQuestion::class);
+    }
+
     public function resumes(): HasMany
     {
         return $this->hasMany(Resume::class);

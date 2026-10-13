@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const SUB_TABS = [
   { href: "/gig-leads", label: "Leads" },
   { href: "/gig-leads/resumes", label: "Resumes" },
+  { href: "/gig-leads/interview-prep", label: "Interview Prep" },
 ] as const;
 
 export function GigLeadsSubNav() {
