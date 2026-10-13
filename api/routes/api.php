@@ -82,6 +82,7 @@ Route::middleware('auth:sanctum')->prefix('resumes')->group(function () {
     Route::get('/', [ResumeController::class, 'index']);
     Route::post('/', [ResumeController::class, 'store']);
     Route::post('/profile-image', [ResumeController::class, 'storeProfileImage']);
+    Route::get('/{resume}/download-all', [ResumeController::class, 'downloadAll']);
     Route::get('/{resume}/download', [ResumeController::class, 'download']);
     Route::post('/{resume}/convert', [ResumeController::class, 'convert']);
     Route::patch('/{resume}/primary', [ResumeController::class, 'makePrimary']);
@@ -93,5 +94,7 @@ Route::middleware('auth:sanctum')->prefix('resumes')->group(function () {
 Route::get('/resumes/{resume}/view-signed', [ResumeController::class, 'viewSigned'])
     ->middleware('signed')
     ->name('resumes.view-signed');
+
+Route::get('/public/resume', [ResumeController::class, 'publicResume']);
 
 Route::get('/assets/images/{filename}', [ResumeController::class, 'image']);

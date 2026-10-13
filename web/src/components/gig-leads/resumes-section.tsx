@@ -7,6 +7,7 @@ import {
   deleteResume,
   getResumes,
   makeResumePrimary,
+  resumeDownloadAllUrl,
   resumeDownloadUrl,
   uploadProfileImage,
   uploadResume,
@@ -243,6 +244,12 @@ export function ResumesSection() {
                       View {view.format.toUpperCase()}
                     </a>
                   ))}
+                  <a
+                    href={resumeDownloadAllUrl(resume.id)}
+                    className="hover:text-foreground"
+                  >
+                    Download all
+                  </a>
                   {resume.convertible_to && (
                     <button
                       type="button"

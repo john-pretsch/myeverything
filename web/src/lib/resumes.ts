@@ -68,6 +68,10 @@ export function deleteResume(id: number): Promise<void> {
   return apiFetch<void>(`/api/resumes/${id}`, { method: "DELETE" });
 }
 
+export function resumeDownloadAllUrl(id: number): string {
+  return `${API_URL}/api/resumes/${id}/download-all`;
+}
+
 export function resumeDownloadUrl(id: number): string {
   return `${API_URL}/api/resumes/${id}/download`;
 }

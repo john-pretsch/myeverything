@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use ZipArchive;
 
 class ResumeController extends Controller
 {
@@ -82,6 +83,52 @@ class ResumeController extends Controller
     }
 
     /**
+     * Zip every version of a resume: the PDF and HTML files it has, plus its
+     * extracted text. The profile image rides along with an HTML version so
+     * the page's relative profile.png reference still resolves.
+     */
+    public function downloadAll(Request $request, Resume $resume)
+    {
+        $this->authorize('view', $resume);
+
+        $base = Str::slug(pathinfo($resume->original_filename, PATHINFO_FILENAME)) ?: 'resume';
+        $disk = Storage::disk('local');
+        $zipPath = tempnam(sys_get_temp_dir(), 'resume');
+
+        $zip = new ZipArchive();
+        $zip->open($zipPath, ZipArchive::OVERWRITE);
+
+        $files = [[$resume->path, $resume->mime_type]];
+        if ($resume->alt_path !== null) {
+            $files[] = [$resume->alt_path, $resume->alt_mime_type];
+        }
+
+        foreach ($files as [$path, $mime]) {
+            $ext = match ($mime) {
+                'application/pdf' => 'pdf',
+                'text/html' => 'html',
+                default => null,
+            };
+            if ($ext !== null) {
+                $zip->addFromString("{$base}.{$ext}", $disk->get($path));
+            }
+        }
+
+        if ($resume->content) {
+            $zip->addFromString("{$base}.txt", $resume->content);
+        }
+
+        $profileImage = ProfileImageProcessor::directory().'/'.ProfileImageProcessor::filenameFor($resume->user_id);
+        if ($resume->hasHtmlVersion() && is_file($profileImage)) {
+            $zip->addFile($profileImage, 'profile.png');
+        }
+
+        $zip->close();
+
+        return response()->download($zipPath, "{$base}.zip")->deleteFileAfterSend();
+    }
+
+    /**
      * Serve a resume inline for viewing in a new browser tab. Reached via a
      * signed URL (see ResumeResource) rather than auth:sanctum, since a
      * plain top-level navigation to a PDF often carries no Referer/Origin
@@ -100,19 +147,72 @@ class ResumeController extends Controller
         $headers = ['Content-Type' => $mime];
 
         if ($mime === 'text/html') {
-            // User-supplied HTML served from the API origin: no scripts, no
-            // network fetches beyond inline styles and images.
-            $headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:";
-            $headers['X-Content-Type-Options'] = 'nosniff';
-
             return response(
                 $images->rewrite(Storage::disk('local')->get($path), $resume->user_id),
                 200,
-                $headers,
+                $headers + $this->htmlHeaders(),
             );
         }
 
         return Storage::disk('local')->response($path, $filename, $headers);
+    }
+
+    /**
+     * Unauthenticated, embeddable copy of the configured user's primary HTML
+     * resume, for display on an external site (iframe, or fetch via CORS).
+     */
+    public function publicResume(Request $request, ResumeImageRewriter $images)
+    {
+        $userId = config('resume.public_user_id');
+
+        $resume = $userId
+            ? Resume::where('user_id', $userId)->where('is_primary', true)->first()
+            : null;
+
+        $path = match (true) {
+            $resume === null => null,
+            $resume->mime_type === 'text/html' => $resume->path,
+            $resume->alt_mime_type === 'text/html' => $resume->alt_path,
+            default => null,
+        };
+
+        abort_if($path === null, 404);
+
+        $origins = config('resume.embed_origins');
+        $headers = $this->htmlHeaders($origins ?: ["'none'"]) + ['Cache-Control' => 'public, max-age=300'];
+
+        if (in_array($request->headers->get('Origin'), $origins, true)) {
+            $headers['Access-Control-Allow-Origin'] = $request->headers->get('Origin');
+            $headers['Vary'] = 'Origin';
+        }
+
+        return response(
+            $images->rewrite(Storage::disk('local')->get($path), $resume->user_id),
+            200,
+            ['Content-Type' => 'text/html'] + $headers,
+        );
+    }
+
+    /**
+     * Headers for serving user-supplied HTML from the API origin: no scripts,
+     * no network fetches beyond inline styles and images. Framing is limited
+     * to $frameAncestors (none by default).
+     *
+     * @param  list<string>  $frameAncestors
+     * @return array<string, string>
+     */
+    private function htmlHeaders(array $frameAncestors = []): array
+    {
+        $csp = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:";
+
+        if ($frameAncestors !== []) {
+            $csp .= '; frame-ancestors '.implode(' ', $frameAncestors);
+        }
+
+        return [
+            'Content-Security-Policy' => $csp,
+            'X-Content-Type-Options' => 'nosniff',
+        ];
     }
 
     public function makePrimary(Request $request, Resume $resume)
