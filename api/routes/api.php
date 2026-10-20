@@ -29,6 +29,7 @@ Route::prefix('news')->group(function () {
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/sources', [SourceController::class, 'store']);
+        Route::post('/sources/{source}/refresh', [SourceController::class, 'refresh'])->middleware('throttle:20,1');
         Route::delete('/sources/{source}', [SourceController::class, 'destroy']);
         Route::patch('/sources/reorder', [SourceController::class, 'reorder']);
 

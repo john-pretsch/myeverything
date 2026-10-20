@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\NewsSourceResource;
 use App\Models\NewsSource;
 use App\Rules\SafeFeedUrl;
+use App\Services\News\NewsSourceFetcher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -65,6 +66,28 @@ class SourceController extends Controller
             ->value('position');
 
         return new NewsSourceResource($source);
+    }
+
+    /**
+     * Fetch one of the user's sources right now and report which articles
+     * were new, so the feed can surface them at the top.
+     */
+    public function refresh(Request $request, NewsSource $source, NewsSourceFetcher $fetcher)
+    {
+        abort_unless(
+            $request->user()->newsSources()->where('news_sources.id', $source->id)->exists(),
+            404,
+        );
+
+        // Manual refreshes tag fewer articles than the scheduled run, to keep the request quick.
+        $taggingBudget = 10;
+        $result = $fetcher->fetch($source, $taggingBudget);
+
+        if ($result['error'] !== null) {
+            return response()->json(['message' => "Couldn't refresh {$source->name}: {$result['error']}"], 502);
+        }
+
+        return response()->json(['data' => ['new_article_ids' => $result['ids']]]);
     }
 
     public function destroy(Request $request, NewsSource $source)

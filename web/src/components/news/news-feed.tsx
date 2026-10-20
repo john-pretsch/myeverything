@@ -13,6 +13,7 @@ import {
   getSources,
   getTags,
   getTopics,
+  refreshSource,
   removeSource,
   reorderSources,
   voteTag,
@@ -50,6 +51,9 @@ export function NewsFeed() {
     null,
   );
   const [selectedTagId, setSelectedTagId] = useState<number | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<number[]>([]);
+  const [refreshingId, setRefreshingId] = useState<number | null>(null);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
   const loading = requestId !== resolvedId;
 
   useEffect(() => {
@@ -63,7 +67,14 @@ export function NewsFeed() {
 
     Promise.all([
       getSources(),
-      getFeed(50, searchQuery, topicId, selectedSourceId, selectedTagId),
+      getFeed(
+        50,
+        searchQuery,
+        topicId,
+        selectedSourceId,
+        selectedTagId,
+        pinnedIds,
+      ),
       getTags(),
       getTopics(),
     ])
@@ -85,6 +96,8 @@ export function NewsFeed() {
     return () => {
       ignore = true;
     };
+    // pinnedIds is read at request time; changes always accompany a reload().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, requestId, searchQuery, topicId, selectedSourceId, selectedTagId]);
 
   function reload() {
@@ -123,6 +136,30 @@ export function NewsFeed() {
   async function handleReorder(sourceIds: number[]) {
     const updated = await reorderSources(sourceIds);
     setSources(updated);
+  }
+
+  async function handleRefreshSource(sourceId: number) {
+    const name = sources.find((s) => s.id === sourceId)?.name ?? "this source";
+    setRefreshingId(sourceId);
+    setRefreshNotice(null);
+    setError(null);
+    try {
+      const newIds = await refreshSource(sourceId);
+      setRefreshNotice(
+        newIds.length === 0
+          ? `No new items from ${name}.`
+          : `${newIds.length} new ${newIds.length === 1 ? "item" : "items"} from ${name}.`,
+      );
+      if (newIds.length > 0) {
+        setPinnedIds((prev) => [...new Set([...prev, ...newIds])]);
+        reload();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    } catch {
+      setError(`Couldn't refresh ${name}.`);
+    } finally {
+      setRefreshingId(null);
+    }
   }
 
   async function handleVoteTag(tagId: number, direction: 1 | -1) {
@@ -239,6 +276,9 @@ export function NewsFeed() {
           </p>
         )}
         {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+        {refreshNotice && (
+          <p className="mb-4 text-sm text-zinc-500">{refreshNotice}</p>
+        )}
         {loading ? (
           <p className="text-sm text-zinc-500">Loading...</p>
         ) : articles.length === 0 ? (
@@ -255,6 +295,7 @@ export function NewsFeed() {
                 article={article}
                 canTag={status === "authenticated"}
                 showTopicDot={topicId === null}
+                isNew={pinnedIds.includes(article.id)}
                 onApplyTag={handleApplyTag}
                 onDetachTag={handleDetachTag}
                 onVoteTag={handleVoteTag}
@@ -276,6 +317,8 @@ export function NewsFeed() {
               onAddCustom={handleAddCustom}
               onRemove={handleRemove}
               onReorder={handleReorder}
+              refreshingId={refreshingId}
+              onRefresh={handleRefreshSource}
             />
             <TagManager
               tags={tags}

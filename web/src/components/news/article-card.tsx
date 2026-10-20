@@ -17,6 +17,7 @@ export function ArticleCard({
   article,
   canTag,
   showTopicDot,
+  isNew,
   onApplyTag,
   onDetachTag,
   onVoteTag,
@@ -24,6 +25,7 @@ export function ArticleCard({
   article: NewsArticle;
   canTag: boolean;
   showTopicDot: boolean;
+  isNew: boolean;
   onApplyTag: (articleId: number, name: string) => Promise<void>;
   onDetachTag: (articleId: number, tagId: number) => void;
   onVoteTag: (tagId: number, direction: 1 | -1) => void;
@@ -60,6 +62,11 @@ export function ArticleCard({
             />
           )}
           <span className="font-medium">{article.source.name}</span>
+          {isNew && (
+            <span className="rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background">
+              New
+            </span>
+          )}
           {article.published_at && (
             <span>{formatPublished(article.published_at)}</span>
           )}

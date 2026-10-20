@@ -23,6 +23,7 @@ class FeedController extends Controller
         $topicId = $request->integer('topic');
         $sourceId = $request->integer('source');
         $tagId = $request->integer('tag');
+        $pinnedIds = collect($request->input('pinned', []))->map(fn ($id) => (int) $id)->filter()->values();
 
         $sources = $user
             ? $user->newsSources()
@@ -92,6 +93,13 @@ class FeedController extends Controller
         // holds across the whole visible window, not just a pre-cut slice.
         if (! $topicId) {
             $articles = $this->interleaveByTopic($articles);
+        }
+
+        // Freshly refreshed articles go first (still in relevance order),
+        // regardless of interleaving or the limit.
+        if ($pinnedIds->isNotEmpty()) {
+            [$pinned, $rest] = $articles->partition(fn (NewsArticle $a) => $pinnedIds->contains($a->id));
+            $articles = $pinned->concat($rest)->values();
         }
 
         $articles = $articles->take($limit);

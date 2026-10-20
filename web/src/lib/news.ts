@@ -12,12 +12,14 @@ export async function getFeed(
   topicId: number | null = null,
   sourceId: number | null = null,
   tagId: number | null = null,
+  pinnedIds: number[] = [],
 ): Promise<NewsArticle[]> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (q.trim() !== "") params.set("q", q.trim());
   if (topicId !== null) params.set("topic", String(topicId));
   if (sourceId !== null) params.set("source", String(sourceId));
   if (tagId !== null) params.set("tag", String(tagId));
+  pinnedIds.forEach((id) => params.append("pinned[]", String(id)));
   const res = await apiFetch<{ data: NewsArticle[] }>(
     `/api/news/feed?${params.toString()}`,
   );
@@ -62,6 +64,14 @@ export async function reorderSources(
     { method: "PATCH", body: { source_ids: sourceIds } },
   );
   return res.data;
+}
+
+export async function refreshSource(sourceId: number): Promise<number[]> {
+  const res = await apiFetch<{ data: { new_article_ids: number[] } }>(
+    `/api/news/sources/${sourceId}/refresh`,
+    { method: "POST" },
+  );
+  return res.data.new_article_ids;
 }
 
 export async function getTags(): Promise<Tag[]> {

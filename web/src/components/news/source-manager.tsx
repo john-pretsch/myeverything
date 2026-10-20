@@ -15,6 +15,8 @@ export function SourceManager({
   onAddCustom,
   onRemove,
   onReorder,
+  refreshingId,
+  onRefresh,
 }: {
   addedSources: NewsSource[];
   catalogSources: NewsSource[];
@@ -25,6 +27,8 @@ export function SourceManager({
   onAddCustom: (name: string, feedUrl: string) => Promise<void>;
   onRemove: (sourceId: number) => Promise<void>;
   onReorder: (sourceIds: number[]) => Promise<void>;
+  refreshingId: number | null;
+  onRefresh: (sourceId: number) => Promise<void>;
 }) {
   const [customName, setCustomName] = useState("");
   const [customFeedUrl, setCustomFeedUrl] = useState("");
@@ -134,6 +138,18 @@ export function SourceManager({
                 {source.name}
               </button>
               <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={`Refresh ${source.name}`}
+                  title={`Refresh ${source.name}`}
+                  disabled={refreshingId !== null}
+                  onClick={() => onRefresh(source.id)}
+                  className={`text-zinc-500 hover:text-foreground disabled:opacity-50 ${
+                    refreshingId === source.id ? "animate-spin" : ""
+                  }`}
+                >
+                  ↻
+                </button>
                 <button
                   type="button"
                   aria-label={`Move ${source.name} up`}
