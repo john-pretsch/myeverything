@@ -15,6 +15,9 @@ class FeedController extends Controller
     /** Each point of net tag-vote affinity shifts an article's effective recency by this many hours. */
     private const AFFINITY_HOURS = 6;
 
+    /** Caps how many search terms are ANDed together, to bound query size. */
+    private const MAX_SEARCH_TERMS = 8;
+
     public function index(Request $request)
     {
         $user = $request->user();
@@ -50,8 +53,10 @@ class FeedController extends Controller
             $articlesQuery->whereHas('tags', fn ($q) => $q->where('tags.id', $tagId));
         }
 
-        if ($query !== '') {
-            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $query);
+        // Every term must appear in the title or summary (any order, either
+        // field); "double quoted" segments are matched as a single phrase.
+        foreach ($this->searchTerms($query) as $term) {
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $term);
             $articlesQuery->where(function ($inner) use ($escaped) {
                 $inner->where('title', 'like', "%{$escaped}%")
                     ->orWhere('summary', 'like', "%{$escaped}%");
@@ -158,5 +163,23 @@ class FeedController extends Controller
         }
 
         return collect($result);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function searchTerms(string $query): array
+    {
+        preg_match_all('/"([^"]+)"|(\S+)/u', $query, $matches, PREG_SET_ORDER);
+
+        $terms = [];
+        foreach ($matches as $match) {
+            $term = trim($match[1] !== '' ? $match[1] : ($match[2] ?? ''), "\" \t");
+            if ($term !== '') {
+                $terms[] = $term;
+            }
+        }
+
+        return array_slice($terms, 0, self::MAX_SEARCH_TERMS);
     }
 }
