@@ -161,7 +161,7 @@ class ResumeController extends Controller
      * Unauthenticated, embeddable copy of the configured user's primary HTML
      * resume, for display on an external site (iframe, or fetch via CORS).
      */
-    public function publicResume(Request $request, ResumeImageRewriter $images)
+    public function publicResume(Request $request, ResumeImageRewriter $images, ResumePdfGenerator $pdfs)
     {
         $userId = config('resume.public_user_id');
 
@@ -180,17 +180,47 @@ class ResumeController extends Controller
 
         $origins = config('resume.embed_origins');
         $headers = $this->htmlHeaders($origins ?: ["'none'"]) + ['Cache-Control' => 'public, max-age=300'];
+        $headers['Content-Security-Policy'] = str_replace('sandbox;', 'sandbox allow-downloads;', $headers['Content-Security-Policy']);
 
         if (in_array($request->headers->get('Origin'), $origins, true)) {
             $headers['Access-Control-Allow-Origin'] = $request->headers->get('Origin');
             $headers['Vary'] = 'Origin';
         }
 
+        $html = $images->rewrite(Storage::disk('local')->get($path), $resume->user_id);
+
         return response(
-            $images->rewrite(Storage::disk('local')->get($path), $resume->user_id),
+            $pdfs->withDownloadLink($html, '/resume.pdf'),
             200,
             ['Content-Type' => 'text/html'] + $headers,
         );
+    }
+
+    /**
+     * The public resume as a black-and-white, photo-free, print-ready PDF.
+     */
+    public function publicResumePdf(ResumePdfGenerator $pdfs)
+    {
+        $userId = config('resume.public_user_id');
+
+        $resume = $userId
+            ? Resume::where('user_id', $userId)->where('is_primary', true)->first()
+            : null;
+
+        $path = match (true) {
+            $resume === null => null,
+            $resume->mime_type === 'text/html' => $resume->path,
+            $resume->alt_mime_type === 'text/html' => $resume->alt_path,
+            default => null,
+        };
+
+        abort_if($path === null, 404);
+
+        return response($pdfs->renderHtml($pdfs->toPrintHtml(Storage::disk('local')->get($path))), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="resume.pdf"',
+            'Cache-Control' => 'public, max-age=300',
+        ]);
     }
 
     /**

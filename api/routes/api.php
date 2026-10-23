@@ -106,5 +106,6 @@ Route::get('/resumes/{resume}/view-signed', [ResumeController::class, 'viewSigne
     ->name('resumes.view-signed');
 
 Route::get('/public/resume', [ResumeController::class, 'publicResume']);
+Route::get('/public/resume/pdf', [ResumeController::class, 'publicResumePdf']);
 
 Route::get('/assets/images/{filename}', [ResumeController::class, 'image']);
