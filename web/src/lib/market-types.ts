@@ -39,3 +39,33 @@ export type MarketOverview = {
     error: string | null;
   };
 };
+
+export type StockProfile = {
+  symbol: string;
+  description: string | null;
+  sector: string | null;
+  industry: string | null;
+  website: string | null;
+};
+
+export const CHART_RANGES = [
+  { value: "1d", label: "1D" },
+  { value: "5d", label: "5D" },
+  { value: "1mo", label: "1M" },
+  { value: "3mo", label: "3M" },
+  { value: "6mo", label: "6M" },
+  { value: "ytd", label: "YTD" },
+  { value: "1y", label: "1Y" },
+  { value: "5y", label: "5Y" },
+  { value: "max", label: "Max" },
+] as const;
+
+export type ChartRange = (typeof CHART_RANGES)[number]["value"];
+
+export type StockChart = {
+  symbol: string;
+  range: ChartRange;
+  currency: string | null;
+  previous_close: number | null;
+  points: { t: number; c: number }[];
+};

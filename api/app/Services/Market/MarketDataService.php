@@ -236,4 +236,188 @@ class MarketDataService
             return null;
         }
     }
+
+    /** Chart range => Yahoo bar interval, and how long a cached chart stays fresh (minutes). */
+    private const CHART_RANGES = [
+        '1d' => ['interval' => '5m', 'ttl' => 2],
+        '5d' => ['interval' => '15m', 'ttl' => 5],
+        '1mo' => ['interval' => '1d', 'ttl' => 15],
+        '3mo' => ['interval' => '1d', 'ttl' => 30],
+        '6mo' => ['interval' => '1d', 'ttl' => 30],
+        'ytd' => ['interval' => '1d', 'ttl' => 30],
+        '1y' => ['interval' => '1d', 'ttl' => 30],
+        '5y' => ['interval' => '1wk', 'ttl' => 60],
+        'max' => ['interval' => '1mo', 'ttl' => 60],
+    ];
+
+    public static function chartRanges(): array
+    {
+        return array_keys(self::CHART_RANGES);
+    }
+
+    /**
+     * Company profile for the stock detail modal. Cached for a day; returns
+     * null fields (never throws) when the provider is unavailable.
+     *
+     * @return array{symbol: string, description: ?string, sector: ?string, industry: ?string, website: ?string}|null
+     */
+    public function stockProfile(string $symbol): ?array
+    {
+        $symbol = strtoupper($symbol);
+
+        return Cache::remember("market:profile:{$symbol}", now()->addDay(), function () use ($symbol) {
+            try {
+                $profile = $this->yahooAuthenticated(
+                    "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{$symbol}",
+                    ['modules' => 'assetProfile'],
+                )->json('quoteSummary.result.0.assetProfile');
+
+                if (! $profile) {
+                    return null;
+                }
+
+                return [
+                    'symbol' => $symbol,
+                    'description' => isset($profile['longBusinessSummary'])
+                        ? $this->briefSummary($profile['longBusinessSummary'])
+                        : null,
+                    'sector' => $profile['sector'] ?? null,
+                    'industry' => $profile['industry'] ?? null,
+                    'website' => $profile['website'] ?? null,
+                ];
+            } catch (\Throwable $e) {
+                Log::warning("Failed to fetch stock profile {$symbol}", ['error' => $e->getMessage()]);
+
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Price history for one chart range.
+     *
+     * @return array{symbol: string, range: string, currency: ?string, previous_close: ?float, points: array<int, array{t: int, c: float}>}|null
+     */
+    public function stockChart(string $symbol, string $range): ?array
+    {
+        $symbol = strtoupper($symbol);
+        $config = self::CHART_RANGES[$range];
+
+        return Cache::remember("market:chart:{$symbol}:{$range}", now()->addMinutes($config['ttl']), function () use ($symbol, $range, $config) {
+            try {
+                $response = Http::timeout(10)
+                    ->withUserAgent(self::USER_AGENT)
+                    ->get("https://query1.finance.yahoo.com/v8/finance/chart/{$symbol}", [
+                        'range' => $range,
+                        'interval' => $config['interval'],
+                    ]);
+
+                if (! $response->successful()) {
+                    throw new \RuntimeException("HTTP {$response->status()}");
+                }
+
+                $result = $response->json('chart.result.0');
+                $timestamps = $result['timestamp'] ?? [];
+                $closes = $result['indicators']['quote'][0]['close'] ?? [];
+
+                $points = [];
+                foreach ($timestamps as $i => $t) {
+                    if (isset($closes[$i])) {
+                        $points[] = ['t' => $t, 'c' => round($closes[$i], 4)];
+                    }
+                }
+
+                if ($points === []) {
+                    throw new \RuntimeException('No price history');
+                }
+
+                return [
+                    'symbol' => $symbol,
+                    'range' => $range,
+                    'currency' => $result['meta']['currency'] ?? null,
+                    'previous_close' => $result['meta']['chartPreviousClose'] ?? null,
+                    'points' => $points,
+                ];
+            } catch (\Throwable $e) {
+                Log::warning("Failed to fetch stock chart {$symbol} {$range}", ['error' => $e->getMessage()]);
+
+                return null;
+            }
+        });
+    }
+
+    /** First few sentences of a company summary, capped in length. */
+    private function briefSummary(string $text): string
+    {
+        $sentences = preg_split('/(?<=[.!?])\s+(?=[A-Z])/u', trim($text)) ?: [$text];
+        $brief = '';
+
+        foreach (array_slice($sentences, 0, 3) as $sentence) {
+            if ($brief !== '' && mb_strlen($brief.' '.$sentence) > 450) {
+                break;
+            }
+            $brief = trim($brief.' '.$sentence);
+        }
+
+        return mb_strlen($brief) > 500 ? rtrim(mb_substr($brief, 0, 497)).'...' : $brief;
+    }
+
+    /**
+     * GET a Yahoo endpoint that requires a session cookie + crumb (the
+     * quoteSummary family). The crumb is cached; on a 401 it is re-fetched
+     * once before giving up.
+     */
+    private function yahooAuthenticated(string $url, array $query): \Illuminate\Http\Client\Response
+    {
+        foreach ([false, true] as $forceNew) {
+            [$cookie, $crumb] = $this->yahooSession($forceNew);
+
+            $response = Http::timeout(10)
+                ->withUserAgent(self::USER_AGENT)
+                ->withHeaders(['Cookie' => $cookie])
+                ->get($url, $query + ['crumb' => $crumb]);
+
+            if ($response->status() !== 401) {
+                break;
+            }
+        }
+
+        if (! $response->successful()) {
+            throw new \RuntimeException("HTTP {$response->status()}");
+        }
+
+        return $response;
+    }
+
+    /** @return array{0: string, 1: string} [cookie header value, crumb] */
+    private function yahooSession(bool $forceNew): array
+    {
+        if ($forceNew) {
+            Cache::forget('market:yahoo-session');
+        }
+
+        return Cache::remember('market:yahoo-session', now()->addHour(), function () {
+            $cookieResponse = Http::timeout(10)->withUserAgent(self::USER_AGENT)->get('https://fc.yahoo.com');
+
+            $cookie = collect($cookieResponse->cookies()->toArray())
+                ->map(fn ($c) => "{$c['Name']}={$c['Value']}")
+                ->implode('; ');
+
+            if ($cookie === '') {
+                throw new \RuntimeException('No Yahoo session cookie');
+            }
+
+            $crumb = Http::timeout(10)
+                ->withUserAgent(self::USER_AGENT)
+                ->withHeaders(['Cookie' => $cookie])
+                ->get('https://query1.finance.yahoo.com/v1/test/getcrumb')
+                ->body();
+
+            if ($crumb === '' || str_contains($crumb, '<')) {
+                throw new \RuntimeException('No Yahoo crumb');
+            }
+
+            return [$cookie, $crumb];
+        });
+    }
 }

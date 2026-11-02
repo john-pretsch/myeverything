@@ -9,6 +9,7 @@ import type {
   MarketOverview as MarketOverviewData,
   StockMover,
 } from "@/lib/market-types";
+import { StockModal } from "./stock-modal";
 
 function formatPrice(value: number | null, decimals?: number): string {
   if (value === null) return "—";
@@ -141,23 +142,34 @@ function IndicesSection({
   );
 }
 
-function MoverList({ title, items }: { title: string; items: StockMover[] }) {
+function MoverList({
+  title,
+  items,
+  onSelect,
+}: {
+  title: string;
+  items: StockMover[];
+  onSelect: (stock: StockMover) => void;
+}) {
   return (
     <div>
       <p className="mb-2 text-xs font-medium text-zinc-500">{title}</p>
       <ul className="flex flex-col gap-1 text-sm">
         {items.map((stock) => (
-          <li
-            key={stock.symbol}
-            className="flex items-center justify-between gap-3"
-          >
-            <span className="text-zinc-500">
-              {stock.name} <span className="text-xs">({stock.symbol})</span>
-            </span>
-            <span className="flex items-center gap-2">
-              <span>${formatPrice(stock.price)}</span>
-              <ChangeBadge pct={stock.change_pct} />
-            </span>
+          <li key={stock.symbol}>
+            <button
+              type="button"
+              onClick={() => onSelect(stock)}
+              className="flex w-full items-center justify-between gap-3 rounded px-1 py-0.5 text-left hover:bg-black/5 dark:hover:bg-white/10"
+            >
+              <span className="text-zinc-500">
+                {stock.name} <span className="text-xs">({stock.symbol})</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span>${formatPrice(stock.price)}</span>
+                <ChangeBadge pct={stock.change_pct} />
+              </span>
+            </button>
           </li>
         ))}
         {items.length === 0 && (
@@ -172,10 +184,12 @@ function MoversSection({
   gainers,
   losers,
   error,
+  onSelect,
 }: {
   gainers: StockMover[];
   losers: StockMover[];
   error: string | null;
+  onSelect: (stock: StockMover) => void;
 }) {
   return (
     <div className="rounded border border-black/10 p-4 dark:border-white/10">
@@ -184,8 +198,8 @@ function MoversSection({
         <SectionError message={error} />
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <MoverList title="Best performers" items={gainers} />
-          <MoverList title="Worst performers" items={losers} />
+          <MoverList title="Best performers" items={gainers} onSelect={onSelect} />
+          <MoverList title="Worst performers" items={losers} onSelect={onSelect} />
         </div>
       )}
     </div>
@@ -204,6 +218,7 @@ export function MarketOverview() {
   const [data, setData] = useState<MarketOverviewData | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedStock, setSelectedStock] = useState<StockMover | null>(null);
   const [requestId, setRequestId] = useState(0);
   const [resolvedId, setResolvedId] = useState(-1);
   const loading = requestId !== resolvedId;
@@ -276,8 +291,15 @@ export function MarketOverview() {
             gainers={data.movers.gainers}
             losers={data.movers.losers}
             error={data.movers.error}
+            onSelect={setSelectedStock}
           />
         </div>
+      )}
+      {selectedStock && (
+        <StockModal
+          stock={selectedStock}
+          onClose={() => setSelectedStock(null)}
+        />
       )}
     </div>
   );

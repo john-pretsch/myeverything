@@ -52,6 +52,8 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/topics')->group(func
 });
 
 Route::get('/market/overview', [MarketController::class, 'overview']);
+Route::get('/market/stocks/{symbol}', [MarketController::class, 'stockProfile'])->middleware('throttle:60,1');
+Route::get('/market/stocks/{symbol}/chart', [MarketController::class, 'stockChart'])->middleware('throttle:60,1');
 
 Route::middleware('auth:sanctum')->prefix('todos')->group(function () {
     Route::get('/', [TodoController::class, 'index']);
