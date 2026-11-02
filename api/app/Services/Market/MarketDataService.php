@@ -36,13 +36,23 @@ class MarketDataService
         ['symbol' => '^IXIC', 'name' => 'NASDAQ Composite', 'exchange' => 'NASDAQ'],
     ];
 
+    /** Selectable sizes for the top movers lists; the first is the overview default. */
+    public const MOVER_COUNTS = [5, 10, 25, 50];
+
+    /** Selectable markets for the top movers lists; the first is the overview default. */
+    public const MOVER_REGIONS = ['us', 'ca'];
+
     public function overview(bool $fresh = false): array
     {
         if ($fresh) {
             Cache::forget('market:currencies');
             Cache::forget('market:crypto');
             Cache::forget('market:indices');
-            Cache::forget('market:movers');
+            foreach (self::MOVER_REGIONS as $region) {
+                foreach (self::MOVER_COUNTS as $count) {
+                    Cache::forget("market:movers:{$region}:{$count}");
+                }
+            }
         }
 
         return [
@@ -181,11 +191,21 @@ class MarketDataService
         });
     }
 
-    private function movers(): array
+    public function movers(int $count = self::MOVER_COUNTS[0], string $region = self::MOVER_REGIONS[0], bool $fresh = false): array
     {
-        return Cache::remember('market:movers', now()->addMinutes(5), function () {
-            $gainers = $this->fetchMoverScreen('day_gainers');
-            $losers = $this->fetchMoverScreen('day_losers');
+        $key = "market:movers:{$region}:{$count}";
+
+        if ($fresh) {
+            Cache::forget($key);
+        }
+
+        return Cache::remember($key, now()->addMinutes(5), function () use ($count, $region) {
+            $gainers = $region === 'ca'
+                ? $this->fetchTsxMovers($count, gainers: true)
+                : $this->fetchMoverScreen('day_gainers', $count);
+            $losers = $region === 'ca'
+                ? $this->fetchTsxMovers($count, gainers: false)
+                : $this->fetchMoverScreen('day_losers', $count);
 
             return [
                 'gainers' => $gainers ?? [],
@@ -198,9 +218,61 @@ class MarketDataService
     }
 
     /**
-     * @return array<int, array{symbol: string, name: string, price: float, change_pct: float, exchange: ?string}>|null
+     * Yahoo's predefined gainers/losers screens are US-only, so TSX movers
+     * come from its custom screener (needs the cookie + crumb session). Tiny
+     * or sub-$1 listings are filtered out, since they otherwise dominate the
+     * percent-change ranking.
+     *
+     * @return array<int, array{symbol: string, name: string, price: float, change_pct: float, exchange: ?string, currency: ?string}>|null
      */
-    private function fetchMoverScreen(string $screenId): ?array
+    private function fetchTsxMovers(int $count, bool $gainers): ?array
+    {
+        try {
+            $body = [
+                'size' => $count,
+                'offset' => 0,
+                'sortField' => 'percentchange',
+                'sortType' => $gainers ? 'DESC' : 'ASC',
+                'quoteType' => 'EQUITY',
+                'query' => [
+                    'operator' => 'AND',
+                    'operands' => [
+                        ['operator' => 'EQ', 'operands' => ['exchange', 'TOR']],
+                        ['operator' => 'GT', 'operands' => ['intradaymarketcap', 100_000_000]],
+                        ['operator' => 'GT', 'operands' => ['intradayprice', 1]],
+                    ],
+                ],
+            ];
+
+            $response = $this->yahooAuthenticated(
+                'https://query1.finance.yahoo.com/v1/finance/screener',
+                ['lang' => 'en-CA', 'region' => 'CA', 'formatted' => 'false'],
+                $body,
+            );
+
+            return collect($response->json('finance.result.0.quotes', []))
+                ->filter(fn ($quote) => isset($quote['symbol'], $quote['regularMarketPrice'], $quote['regularMarketChangePercent']))
+                ->map(fn ($quote) => [
+                    'symbol' => $quote['symbol'],
+                    'name' => $quote['shortName'] ?? $quote['longName'] ?? $quote['symbol'],
+                    'price' => $quote['regularMarketPrice'],
+                    'change_pct' => $quote['regularMarketChangePercent'],
+                    'exchange' => $quote['fullExchangeName'] ?? null,
+                    'currency' => $quote['currency'] ?? null,
+                ])
+                ->values()
+                ->all();
+        } catch (\Throwable $e) {
+            Log::warning('Failed to fetch TSX movers', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /**
+     * @return array<int, array{symbol: string, name: string, price: float, change_pct: float, exchange: ?string, currency: ?string}>|null
+     */
+    private function fetchMoverScreen(string $screenId, int $count): ?array
     {
         try {
             $response = Http::timeout(10)
@@ -210,7 +282,7 @@ class MarketDataService
                     'lang' => 'en-US',
                     'region' => 'US',
                     'scrIds' => $screenId,
-                    'count' => 5,
+                    'count' => $count,
                 ]);
 
             if (! $response->successful()) {
@@ -227,6 +299,7 @@ class MarketDataService
                     'price' => $quote['regularMarketPrice'],
                     'change_pct' => $quote['regularMarketChangePercent'],
                     'exchange' => $quote['fullExchangeName'] ?? null,
+                    'currency' => $quote['currency'] ?? null,
                 ])
                 ->values()
                 ->all();
@@ -296,14 +369,14 @@ class MarketDataService
     /**
      * Price history for one chart range.
      *
-     * @return array{symbol: string, range: string, currency: ?string, previous_close: ?float, points: array<int, array{t: int, c: float}>}|null
+     * @return array{symbol: string, range: string, currency: ?string, previous_close: ?float, points: array<int, array{t: int, o: float, h: float, l: float, c: float}>}|null
      */
     public function stockChart(string $symbol, string $range): ?array
     {
         $symbol = strtoupper($symbol);
         $config = self::CHART_RANGES[$range];
 
-        return Cache::remember("market:chart:{$symbol}:{$range}", now()->addMinutes($config['ttl']), function () use ($symbol, $range, $config) {
+        return Cache::remember("market:chart:v2:{$symbol}:{$range}", now()->addMinutes($config['ttl']), function () use ($symbol, $range, $config) {
             try {
                 $response = Http::timeout(10)
                     ->withUserAgent(self::USER_AGENT)
@@ -318,13 +391,22 @@ class MarketDataService
 
                 $result = $response->json('chart.result.0');
                 $timestamps = $result['timestamp'] ?? [];
-                $closes = $result['indicators']['quote'][0]['close'] ?? [];
+                $quote = $result['indicators']['quote'][0] ?? [];
 
                 $points = [];
                 foreach ($timestamps as $i => $t) {
-                    if (isset($closes[$i])) {
-                        $points[] = ['t' => $t, 'c' => round($closes[$i], 4)];
+                    if (! isset($quote['close'][$i])) {
+                        continue;
                     }
+
+                    $close = $quote['close'][$i];
+                    $points[] = [
+                        't' => $t,
+                        'o' => round($quote['open'][$i] ?? $close, 4),
+                        'h' => round($quote['high'][$i] ?? $close, 4),
+                        'l' => round($quote['low'][$i] ?? $close, 4),
+                        'c' => round($close, 4),
+                    ];
                 }
 
                 if ($points === []) {
@@ -364,18 +446,22 @@ class MarketDataService
 
     /**
      * GET a Yahoo endpoint that requires a session cookie + crumb (the
-     * quoteSummary family). The crumb is cached; on a 401 it is re-fetched
+     * quoteSummary and custom-screener family; a $jsonBody makes it a POST). The crumb is cached; on a 401 it is re-fetched
      * once before giving up.
      */
-    private function yahooAuthenticated(string $url, array $query): \Illuminate\Http\Client\Response
+    private function yahooAuthenticated(string $url, array $query, ?array $jsonBody = null): \Illuminate\Http\Client\Response
     {
         foreach ([false, true] as $forceNew) {
             [$cookie, $crumb] = $this->yahooSession($forceNew);
 
-            $response = Http::timeout(10)
+            $request = Http::timeout(10)
                 ->withUserAgent(self::USER_AGENT)
-                ->withHeaders(['Cookie' => $cookie])
-                ->get($url, $query + ['crumb' => $crumb]);
+                ->withHeaders(['Cookie' => $cookie]);
+            $params = $query + ['crumb' => $crumb];
+
+            $response = $jsonBody === null
+                ? $request->get($url, $params)
+                : $request->post($url.'?'.http_build_query($params), $jsonBody);
 
             if ($response->status() !== 401) {
                 break;

@@ -1,13 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getMarketOverview } from "@/lib/market";
-import type {
-  CryptoPrice,
-  CurrencyRate,
-  MarketIndex,
-  MarketOverview as MarketOverviewData,
-  StockMover,
+import { useAuth } from "@/lib/auth-context";
+import {
+  getMarketOverview,
+  getMarketPreferences,
+  getMovers,
+  saveMarketPreferences,
+} from "@/lib/market";
+import {
+  MOVER_COUNTS,
+  type CryptoPrice,
+  type CurrencyRate,
+  type MarketIndex,
+  type MarketOverview as MarketOverviewData,
+  MOVER_REGIONS,
+  type MoverCount,
+  type MoverRegion,
+  type Movers,
+  type StockMover,
 } from "@/lib/market-types";
 import { StockModal } from "./stock-modal";
 
@@ -166,15 +177,18 @@ function MoverList({
                 {stock.name} <span className="text-xs">({stock.symbol})</span>
               </span>
               <span className="flex items-center gap-2">
-                <span>${formatPrice(stock.price)}</span>
+                <span>
+                  ${formatPrice(stock.price)}
+                  {stock.currency && stock.currency !== "USD"
+                    ? ` ${stock.currency}`
+                    : ""}
+                </span>
                 <ChangeBadge pct={stock.change_pct} />
               </span>
             </button>
           </li>
         ))}
-        {items.length === 0 && (
-          <li className="text-zinc-500">No data.</li>
-        )}
+        {items.length === 0 && <li className="text-zinc-500">No data.</li>}
       </ul>
     </div>
   );
@@ -184,22 +198,74 @@ function MoversSection({
   gainers,
   losers,
   error,
+  count,
+  region,
+  loading,
+  onCountChange,
+  onRegionChange,
   onSelect,
 }: {
   gainers: StockMover[];
   losers: StockMover[];
   error: string | null;
+  count: MoverCount;
+  region: MoverRegion;
+  loading: boolean;
+  onCountChange: (count: MoverCount) => void;
+  onRegionChange: (region: MoverRegion) => void;
   onSelect: (stock: StockMover) => void;
 }) {
   return (
     <div className="rounded border border-black/10 p-4 dark:border-white/10">
-      <p className="mb-3 text-sm font-medium">Top Movers (US markets)</p>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-medium">
+          Top Movers ({MOVER_REGIONS.find((r) => r.value === region)?.title})
+        </p>
+        <div className="flex items-center gap-2">
+          <select
+            aria-label="Market"
+            value={region}
+            onChange={(e) => onRegionChange(e.target.value as MoverRegion)}
+            className="rounded border border-black/10 bg-background px-2 py-1 text-xs font-medium dark:border-white/10"
+          >
+            {MOVER_REGIONS.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Number of movers"
+            value={count}
+            onChange={(e) =>
+              onCountChange(Number(e.target.value) as MoverCount)
+            }
+            className="rounded border border-black/10 bg-background px-2 py-1 text-xs font-medium dark:border-white/10"
+          >
+            {MOVER_COUNTS.map((n) => (
+              <option key={n} value={n}>
+                Top {n}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
       {error ? (
         <SectionError message={error} />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <MoverList title="Best performers" items={gainers} onSelect={onSelect} />
-          <MoverList title="Worst performers" items={losers} onSelect={onSelect} />
+        <div
+          className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${loading ? "opacity-50" : ""}`}
+        >
+          <MoverList
+            title="Best performers"
+            items={gainers}
+            onSelect={onSelect}
+          />
+          <MoverList
+            title="Worst performers"
+            items={losers}
+            onSelect={onSelect}
+          />
         </div>
       )}
     </div>
@@ -215,9 +281,19 @@ function timeAgo(iso: string): string {
 }
 
 export function MarketOverview() {
+  const { status: authStatus } = useAuth();
   const [data, setData] = useState<MarketOverviewData | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [moversCount, setMoversCount] = useState<MoverCount>(MOVER_COUNTS[0]);
+  const [moversRegion, setMoversRegion] = useState<MoverRegion>(
+    MOVER_REGIONS[0].value,
+  );
+  const [moversOverride, setMoversOverride] = useState<{
+    count: MoverCount;
+    region: MoverRegion;
+    movers: Movers;
+  } | null>(null);
   const [selectedStock, setSelectedStock] = useState<StockMover | null>(null);
   const [requestId, setRequestId] = useState(0);
   const [resolvedId, setResolvedId] = useState(-1);
@@ -245,9 +321,84 @@ export function MarketOverview() {
     };
   }, [requestId]);
 
+  // Logged-in users get their last-used movers market and size back.
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+
+    let ignore = false;
+    getMarketPreferences()
+      .then((prefs) => {
+        if (ignore) return;
+        setMoversCount(prefs.movers_count);
+        setMoversRegion(prefs.movers_region);
+      })
+      .catch(() => {});
+
+    return () => {
+      ignore = true;
+    };
+  }, [authStatus]);
+
+  function changeMovers(count: MoverCount, region: MoverRegion) {
+    setMoversCount(count);
+    setMoversRegion(region);
+    if (authStatus === "authenticated") {
+      saveMarketPreferences({
+        movers_count: count,
+        movers_region: region,
+      }).catch(() => {});
+    }
+  }
+
+  // The overview carries the default-size lists; any other size is fetched
+  // on its own (and again after each Refresh).
+  useEffect(() => {
+    if (
+      moversCount === MOVER_COUNTS[0] &&
+      moversRegion === MOVER_REGIONS[0].value
+    )
+      return;
+
+    let ignore = false;
+    getMovers(moversCount, moversRegion, requestId > 0)
+      .then((movers) => {
+        if (!ignore)
+          setMoversOverride({
+            count: moversCount,
+            region: moversRegion,
+            movers,
+          });
+      })
+      .catch(() => {
+        if (!ignore) {
+          setMoversOverride({
+            count: moversCount,
+            region: moversRegion,
+            movers: {
+              gainers: [],
+              losers: [],
+              error: "Top movers are unavailable right now.",
+            },
+          });
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [moversCount, moversRegion, requestId]);
+
   function refresh() {
     setRequestId((n) => n + 1);
   }
+
+  const isDefaultMovers =
+    moversCount === MOVER_COUNTS[0] && moversRegion === MOVER_REGIONS[0].value;
+  const shownMovers = isDefaultMovers ? data?.movers : moversOverride?.movers;
+  const moversLoading =
+    !isDefaultMovers &&
+    (moversOverride?.count !== moversCount ||
+      moversOverride?.region !== moversRegion);
 
   return (
     <div>
@@ -288,9 +439,14 @@ export function MarketOverview() {
             />
           </div>
           <MoversSection
-            gainers={data.movers.gainers}
-            losers={data.movers.losers}
-            error={data.movers.error}
+            gainers={(shownMovers ?? data.movers).gainers}
+            losers={(shownMovers ?? data.movers).losers}
+            error={(shownMovers ?? data.movers).error}
+            count={moversCount}
+            region={moversRegion}
+            loading={moversLoading}
+            onCountChange={(count) => changeMovers(count, moversRegion)}
+            onRegionChange={(region) => changeMovers(moversCount, region)}
             onSelect={setSelectedStock}
           />
         </div>

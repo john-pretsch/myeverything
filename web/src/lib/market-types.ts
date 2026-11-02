@@ -27,17 +27,31 @@ export type StockMover = {
   price: number;
   change_pct: number;
   exchange: string | null;
+  currency?: string | null;
+};
+
+export const MOVER_COUNTS = [5, 10, 25, 50] as const;
+
+export type MoverCount = (typeof MOVER_COUNTS)[number];
+
+export const MOVER_REGIONS = [
+  { value: "us", label: "US", title: "US markets" },
+  { value: "ca", label: "Canada", title: "TSX" },
+] as const;
+
+export type MoverRegion = (typeof MOVER_REGIONS)[number]["value"];
+
+export type Movers = {
+  gainers: StockMover[];
+  losers: StockMover[];
+  error: string | null;
 };
 
 export type MarketOverview = {
   currencies: { base: string; rates: CurrencyRate[]; error: string | null };
   crypto: { items: CryptoPrice[]; error: string | null };
   indices: { items: MarketIndex[]; error: string | null };
-  movers: {
-    gainers: StockMover[];
-    losers: StockMover[];
-    error: string | null;
-  };
+  movers: Movers;
 };
 
 export type StockProfile = {
@@ -67,5 +81,5 @@ export type StockChart = {
   range: ChartRange;
   currency: string | null;
   previous_close: number | null;
-  points: { t: number; c: number }[];
+  points: { t: number; o: number; h: number; l: number; c: number }[];
 };

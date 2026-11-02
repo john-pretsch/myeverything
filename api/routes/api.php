@@ -52,6 +52,11 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/topics')->group(func
 });
 
 Route::get('/market/overview', [MarketController::class, 'overview']);
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/market/preferences', [MarketController::class, 'preferences']);
+    Route::put('/market/preferences', [MarketController::class, 'updatePreferences']);
+});
+Route::get('/market/movers', [MarketController::class, 'movers']);
 Route::get('/market/stocks/{symbol}', [MarketController::class, 'stockProfile'])->middleware('throttle:60,1');
 Route::get('/market/stocks/{symbol}/chart', [MarketController::class, 'stockChart'])->middleware('throttle:60,1');
 

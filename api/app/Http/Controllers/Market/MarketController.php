@@ -18,6 +18,22 @@ class MarketController extends Controller
         ]);
     }
 
+    public function movers(Request $request, MarketDataService $market): JsonResponse
+    {
+        $validated = $request->validate([
+            'count' => ['sometimes', 'integer', Rule::in(MarketDataService::MOVER_COUNTS)],
+            'region' => ['sometimes', 'string', Rule::in(MarketDataService::MOVER_REGIONS)],
+        ]);
+
+        return response()->json([
+            'data' => $market->movers(
+                $validated['count'] ?? MarketDataService::MOVER_COUNTS[0],
+                $validated['region'] ?? MarketDataService::MOVER_REGIONS[0],
+                $request->boolean('fresh'),
+            ),
+        ]);
+    }
+
     public function stockProfile(string $symbol, MarketDataService $market): JsonResponse
     {
         $this->validateSymbol($symbol);
@@ -46,5 +62,38 @@ class MarketController extends Controller
     private function validateSymbol(string $symbol): void
     {
         abort_unless(preg_match('/^[A-Za-z0-9.\-]{1,12}$/', $symbol) === 1, 404);
+    }
+
+    public function preferences(Request $request): JsonResponse
+    {
+        return response()->json(['data' => $this->moverPreferences($request)]);
+    }
+
+    public function updatePreferences(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'movers_count' => ['required', 'integer', Rule::in(MarketDataService::MOVER_COUNTS)],
+            'movers_region' => ['required', 'string', Rule::in(MarketDataService::MOVER_REGIONS)],
+        ]);
+
+        $user = $request->user();
+        $user->update(['preferences' => [...($user->preferences ?? []), ...$validated]]);
+
+        return response()->json(['data' => $this->moverPreferences($request)]);
+    }
+
+    /** @return array{movers_count: int, movers_region: string} */
+    private function moverPreferences(Request $request): array
+    {
+        $saved = $request->user()->preferences ?? [];
+
+        return [
+            'movers_count' => in_array($saved['movers_count'] ?? null, MarketDataService::MOVER_COUNTS, true)
+                ? $saved['movers_count']
+                : MarketDataService::MOVER_COUNTS[0],
+            'movers_region' => in_array($saved['movers_region'] ?? null, MarketDataService::MOVER_REGIONS, true)
+                ? $saved['movers_region']
+                : MarketDataService::MOVER_REGIONS[0],
+        ];
     }
 }

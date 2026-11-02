@@ -37,20 +37,27 @@ function formatValue(value: number): string {
 export function PriceChart({ chart }: { chart: StockChart }) {
   const [hover, setHover] = useState<number | null>(null);
   const { points } = chart;
+  const candles = chart.range === "1d" || chart.range === "5d";
 
-  const closes = points.map((p) => p.c);
-  const min = Math.min(...closes);
-  const max = Math.max(...closes);
+  const min = Math.min(...points.map((p) => (candles ? p.l : p.c)));
+  const max = Math.max(...points.map((p) => (candles ? p.h : p.c)));
   const span = max - min || 1;
   const innerW = WIDTH - PAD.left - PAD.right;
   const innerH = HEIGHT - PAD.top - PAD.bottom;
 
+  // Candles sit in equal-width slots so the first/last bodies stay inside the plot.
+  const slot = innerW / points.length;
   const x = (i: number) =>
-    PAD.left + (points.length === 1 ? 0 : (i / (points.length - 1)) * innerW);
+    candles
+      ? PAD.left + slot * (i + 0.5)
+      : PAD.left +
+        (points.length === 1 ? 0 : (i / (points.length - 1)) * innerW);
   const y = (c: number) => PAD.top + (1 - (c - min) / span) * innerH;
 
   const path = points
-    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.c).toFixed(1)}`)
+    .map(
+      (p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.c).toFixed(1)}`,
+    )
     .join(" ");
 
   const first = points[0];
@@ -63,9 +70,10 @@ export function PriceChart({ chart }: { chart: StockChart }) {
   function handleMove(event: React.MouseEvent<SVGSVGElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     const ratio = (event.clientX - rect.left) / rect.width;
-    const index = Math.round(
-      ((ratio * WIDTH - PAD.left) / innerW) * (points.length - 1),
-    );
+    const position = (ratio * WIDTH - PAD.left) / innerW;
+    const index = candles
+      ? Math.floor(position * points.length)
+      : Math.round(position * (points.length - 1));
     setHover(Math.max(0, Math.min(points.length - 1, index)));
   }
 
@@ -83,6 +91,12 @@ export function PriceChart({ chart }: { chart: StockChart }) {
           </span>
         </span>
         <span className="text-xs text-zinc-500">
+          {candles && hover !== null && (
+            <span className="mr-3">
+              O {formatValue(active.o)} H {formatValue(active.h)} L{" "}
+              {formatValue(active.l)} C {formatValue(active.c)}
+            </span>
+          )}
           {formatDate(active.t, chart.range)}
         </span>
       </div>
@@ -94,8 +108,42 @@ export function PriceChart({ chart }: { chart: StockChart }) {
         onMouseMove={handleMove}
         onMouseLeave={() => setHover(null)}
       >
-        <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" />
-        <text x={PAD.left} y={HEIGHT - 6} fontSize="10" fill="currentColor" opacity="0.5">
+        {candles ? (
+          points.map((p, i) => {
+            const color = p.c >= p.o ? "#16a34a" : "#dc2626";
+            const top = y(Math.max(p.o, p.c));
+            const bodyHeight = Math.max(1, y(Math.min(p.o, p.c)) - top);
+            const bodyWidth = Math.max(1, slot * 0.7);
+            return (
+              <g key={p.t}>
+                <line
+                  x1={x(i)}
+                  x2={x(i)}
+                  y1={y(p.h)}
+                  y2={y(p.l)}
+                  stroke={color}
+                  strokeWidth="1"
+                />
+                <rect
+                  x={x(i) - bodyWidth / 2}
+                  y={top}
+                  width={bodyWidth}
+                  height={bodyHeight}
+                  fill={color}
+                />
+              </g>
+            );
+          })
+        ) : (
+          <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" />
+        )}
+        <text
+          x={PAD.left}
+          y={HEIGHT - 6}
+          fontSize="10"
+          fill="currentColor"
+          opacity="0.5"
+        >
           {formatDate(first.t, chart.range)}
         </text>
         <text
@@ -108,7 +156,13 @@ export function PriceChart({ chart }: { chart: StockChart }) {
         >
           {formatDate(last.t, chart.range)}
         </text>
-        <text x={PAD.left} y={PAD.top + 8} fontSize="10" fill="currentColor" opacity="0.5">
+        <text
+          x={PAD.left}
+          y={PAD.top + 8}
+          fontSize="10"
+          fill="currentColor"
+          opacity="0.5"
+        >
           High {formatValue(max)}
         </text>
         <text
@@ -130,7 +184,14 @@ export function PriceChart({ chart }: { chart: StockChart }) {
               stroke="currentColor"
               opacity="0.25"
             />
-            <circle cx={x(hover)} cy={y(points[hover].c)} r="3.5" fill={stroke} />
+            {!candles && (
+              <circle
+                cx={x(hover)}
+                cy={y(points[hover].c)}
+                r="3.5"
+                fill={stroke}
+              />
+            )}
           </>
         )}
       </svg>
