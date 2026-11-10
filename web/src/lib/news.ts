@@ -52,6 +52,22 @@ export async function addCustomSource(
   return res.data;
 }
 
+export type FeedSearchResult = {
+  title: string;
+  feed_url: string;
+  website: string | null;
+  description: string | null;
+  subscribers: number;
+  topics: string[];
+};
+
+export async function searchFeeds(q: string): Promise<FeedSearchResult[]> {
+  const res = await apiFetch<{ data: FeedSearchResult[] }>(
+    `/api/news/sources/search?q=${encodeURIComponent(q)}`,
+  );
+  return res.data;
+}
+
 export function removeSource(sourceId: number): Promise<void> {
   return apiFetch<void>(`/api/news/sources/${sourceId}`, { method: "DELETE" });
 }

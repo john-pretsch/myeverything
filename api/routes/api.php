@@ -28,6 +28,7 @@ Route::prefix('news')->group(function () {
     Route::get('/topics', [TopicController::class, 'index']);
 
     Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/sources/search', [SourceController::class, 'search'])->middleware('throttle:30,1');
         Route::post('/sources', [SourceController::class, 'store']);
         Route::post('/sources/{source}/refresh', [SourceController::class, 'refresh'])->middleware('throttle:20,1');
         Route::delete('/sources/{source}', [SourceController::class, 'destroy']);

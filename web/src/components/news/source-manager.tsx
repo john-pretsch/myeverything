@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { ApiError } from "@/lib/api";
+import { searchFeeds, type FeedSearchResult } from "@/lib/news";
 import type { NewsSource } from "@/lib/news-types";
 
 export function SourceManager({
@@ -35,6 +36,31 @@ export function SourceManager({
   const [customError, setCustomError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showAddPanel, setShowAddPanel] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<FeedSearchResult[] | null>(
+    null,
+  );
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  async function handleSearch(event: FormEvent) {
+    event.preventDefault();
+    setSearchError(null);
+    setSearching(true);
+    try {
+      setSearchResults(await searchFeeds(searchQuery.trim()));
+    } catch {
+      setSearchResults(null);
+      setSearchError("Feed search failed. Try again in a moment.");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function pickResult(result: FeedSearchResult) {
+    setCustomName(result.title);
+    setCustomFeedUrl(result.feed_url);
+  }
 
   function handleRemove(source: NewsSource) {
     if (window.confirm(`Remove ${source.name} from your sources?`)) {
@@ -211,6 +237,64 @@ export function SourceManager({
             className="rounded border border-black/10 p-4 dark:border-white/10"
           >
             <p className="mb-2 text-sm font-medium">Add a custom RSS source</p>
+            <div className="mb-3 flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input
+                  type="search"
+                  placeholder="Search feeds by name or topic"
+                  aria-label="Search feeds by name or topic"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSearch(e);
+                  }}
+                  className="min-w-0 flex-1 rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+                />
+                <button
+                  type="button"
+                  disabled={searching || searchQuery.trim().length < 2}
+                  onClick={handleSearch}
+                  className="rounded border border-black/10 px-3 py-1 text-sm font-medium disabled:opacity-50 dark:border-white/10"
+                >
+                  {searching ? "Searching…" : "Search"}
+                </button>
+              </div>
+              {searchError && (
+                <p className="text-xs text-red-600">{searchError}</p>
+              )}
+              {searchResults !== null && searchResults.length === 0 && (
+                <p className="text-xs text-zinc-500">No feeds found.</p>
+              )}
+              {searchResults !== null && searchResults.length > 0 && (
+                <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+                  {searchResults.map((r) => (
+                    <li key={r.feed_url}>
+                      <button
+                        type="button"
+                        onClick={() => pickResult(r)}
+                        className={`w-full cursor-pointer rounded border px-2 py-1 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${
+                          customFeedUrl === r.feed_url
+                            ? "border-foreground"
+                            : "border-black/10 dark:border-white/10"
+                        }`}
+                      >
+                        <span className="font-medium">{r.title}</span>
+                        {r.subscribers > 0 && (
+                          <span className="ml-2 text-xs text-zinc-500">
+                            {r.subscribers.toLocaleString()} subscribers
+                          </span>
+                        )}
+                        {r.description && (
+                          <span className="block text-xs text-zinc-500">
+                            {r.description}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <div className="flex flex-col gap-2">
               <input
                 type="text"

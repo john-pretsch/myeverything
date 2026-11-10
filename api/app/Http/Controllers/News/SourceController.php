@@ -9,6 +9,7 @@ use App\Rules\SafeFeedUrl;
 use App\Services\News\NewsSourceFetcher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 
 class SourceController extends Controller
 {
@@ -66,6 +67,44 @@ class SourceController extends Controller
             ->value('position');
 
         return new NewsSourceResource($source);
+    }
+
+    /**
+     * Search the public Feedly feed directory (keyless, unofficial) by name
+     * or topic, so a feed URL doesn't have to be hunted down by hand.
+     */
+    public function search(Request $request)
+    {
+        $validated = $request->validate([
+            'q' => ['required', 'string', 'min:2', 'max:100'],
+        ]);
+
+        try {
+            $response = Http::timeout(8)->acceptJson()->get('https://cloud.feedly.com/v3/search/feeds', [
+                'query' => $validated['q'],
+                'count' => 15,
+            ]);
+        } catch (\Throwable) {
+            return response()->json(['message' => 'Feed search is unavailable right now.'], 502);
+        }
+
+        if (! $response->successful()) {
+            return response()->json(['message' => 'Feed search is unavailable right now.'], 502);
+        }
+
+        $results = collect($response->json('results', []))
+            ->map(fn (array $r) => [
+                'title' => (string) ($r['title'] ?? ''),
+                'feed_url' => preg_replace('#^feed/#', '', (string) ($r['feedId'] ?? '')),
+                'website' => $r['website'] ?? null,
+                'description' => isset($r['description']) ? mb_strimwidth($r['description'], 0, 200, '…') : null,
+                'subscribers' => (int) ($r['subscribers'] ?? 0),
+                'topics' => array_slice($r['topics'] ?? [], 0, 5),
+            ])
+            ->filter(fn (array $r) => $r['title'] !== '' && filter_var($r['feed_url'], FILTER_VALIDATE_URL))
+            ->values();
+
+        return response()->json(['data' => $results]);
     }
 
     /**
