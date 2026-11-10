@@ -123,8 +123,12 @@ export function NewsFeed() {
     reload();
   }
 
-  async function handleAddCustom(name: string, feedUrl: string) {
-    await addCustomSource(name, feedUrl);
+  async function handleAddCustom(
+    name: string,
+    feedUrl: string,
+    description: string | null,
+  ) {
+    await addCustomSource(name, feedUrl, description);
     reload();
   }
 

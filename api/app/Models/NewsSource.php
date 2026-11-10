@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'site_url', 'feed_url'])]
+#[Fillable(['name', 'site_url', 'feed_url', 'description'])]
 class NewsSource extends Model
 {
     /** @use HasFactory<NewsSourceFactory> */

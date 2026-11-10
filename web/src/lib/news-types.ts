@@ -14,6 +14,7 @@ export type NewsSource = {
   name: string;
   site_url: string;
   feed_url: string;
+  description: string | null;
   is_default: boolean;
   topics: Topic[];
   is_added: boolean;

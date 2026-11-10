@@ -34,6 +34,25 @@ class RssParser
     }
 
     /**
+     * The feed's own description of itself (RSS channel description or Atom subtitle).
+     */
+    public function channelDescription(string $body): ?string
+    {
+        $previous = libxml_use_internal_errors(true);
+        $xml = simplexml_load_string($body);
+        libxml_use_internal_errors($previous);
+
+        if ($xml === false) {
+            return null;
+        }
+
+        $raw = isset($xml->channel) ? (string) $xml->channel->description : (string) $xml->subtitle;
+        $text = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($raw), ENT_QUOTES | ENT_HTML5)));
+
+        return $text === '' ? null : mb_strimwidth($text, 0, 500, '...');
+    }
+
+    /**
      * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
      */
     private function parseRss(SimpleXMLElement $xml): array

@@ -72,6 +72,10 @@ class NewsSourceFetcher
 
             $source->update(['last_fetched_at' => now(), 'last_fetch_error' => null]);
 
+            if ($source->description === null) {
+                $source->update(['description' => $this->parser->channelDescription($response->body())]);
+            }
+
             return ['ids' => $newIds, 'count' => count($items), 'error' => null];
         } catch (\Throwable $e) {
             $source->update(['last_fetch_error' => $e->getMessage()]);

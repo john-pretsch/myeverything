@@ -44,10 +44,11 @@ export async function addExistingSource(
 export async function addCustomSource(
   name: string,
   feedUrl: string,
+  description: string | null = null,
 ): Promise<NewsSource> {
   const res = await apiFetch<{ data: NewsSource }>("/api/news/sources", {
     method: "POST",
-    body: { name, feed_url: feedUrl },
+    body: { name, feed_url: feedUrl, description },
   });
   return res.data;
 }

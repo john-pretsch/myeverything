@@ -37,6 +37,7 @@ class SourceController extends Controller
         $validated = $request->validate([
             'news_source_id' => ['required_without:feed_url', 'integer', 'exists:news_sources,id'],
             'name' => ['required_with:feed_url', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:500'],
             'feed_url' => ['required_without:news_source_id', 'url', 'max:2048', new SafeFeedUrl],
         ]);
 
@@ -47,6 +48,7 @@ class SourceController extends Controller
                 ['feed_url' => $validated['feed_url']],
                 [
                     'name' => $validated['name'],
+                    'description' => $validated['description'] ?? null,
                     'site_url' => $validated['feed_url'],
                 ],
             );

@@ -1,10 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError } from "@/lib/api";
 import { searchFeeds, type FeedSearchResult } from "@/lib/news";
 import type { NewsSource } from "@/lib/news-types";
+
+function SourceDescription({
+  source,
+  children,
+}: {
+  source: NewsSource;
+  children: ReactNode;
+}) {
+  if (!source.description) return <>{children}</>;
+  return (
+    <span className="group relative inline-block">
+      {children}
+      <span
+        role="tooltip"
+        className="pointer-events-none invisible absolute left-0 top-full z-20 mt-1 w-64 rounded border border-black/10 bg-background p-2 text-xs font-normal text-foreground opacity-0 shadow-lg transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100 dark:border-white/10"
+      >
+        {source.description}
+      </span>
+    </span>
+  );
+}
 
 export function SourceManager({
   addedSources,
@@ -25,7 +46,11 @@ export function SourceManager({
   selectedSourceId: number | null;
   onSelectSource: (sourceId: number | null) => void;
   onAddExisting: (sourceId: number) => Promise<void>;
-  onAddCustom: (name: string, feedUrl: string) => Promise<void>;
+  onAddCustom: (
+    name: string,
+    feedUrl: string,
+    description: string | null,
+  ) => Promise<void>;
   onRemove: (sourceId: number) => Promise<void>;
   onReorder: (sourceIds: number[]) => Promise<void>;
   refreshingId: number | null;
@@ -33,6 +58,9 @@ export function SourceManager({
 }) {
   const [customName, setCustomName] = useState("");
   const [customFeedUrl, setCustomFeedUrl] = useState("");
+  const [customDescription, setCustomDescription] = useState<string | null>(
+    null,
+  );
   const [customError, setCustomError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showAddPanel, setShowAddPanel] = useState(false);
@@ -60,6 +88,7 @@ export function SourceManager({
   function pickResult(result: FeedSearchResult) {
     setCustomName(result.title);
     setCustomFeedUrl(result.feed_url);
+    setCustomDescription(result.description);
   }
 
   function handleRemove(source: NewsSource) {
@@ -75,19 +104,21 @@ export function SourceManager({
         <ul className="mb-3 flex flex-col gap-1">
           {addedSources.map((s) => (
             <li key={s.id}>
-              <button
-                type="button"
-                onClick={() =>
-                  onSelectSource(selectedSourceId === s.id ? null : s.id)
-                }
-                className={
-                  selectedSourceId === s.id
-                    ? "cursor-pointer font-medium text-foreground"
-                    : "cursor-pointer text-zinc-500 hover:text-foreground"
-                }
-              >
-                {s.name}
-              </button>
+              <SourceDescription source={s}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSelectSource(selectedSourceId === s.id ? null : s.id)
+                  }
+                  className={
+                    selectedSourceId === s.id
+                      ? "cursor-pointer font-medium text-foreground"
+                      : "cursor-pointer text-zinc-500 hover:text-foreground"
+                  }
+                >
+                  {s.name}
+                </button>
+              </SourceDescription>
             </li>
           ))}
         </ul>
@@ -111,9 +142,10 @@ export function SourceManager({
     setCustomError(null);
     setSubmitting(true);
     try {
-      await onAddCustom(customName, customFeedUrl);
+      await onAddCustom(customName, customFeedUrl, customDescription);
       setCustomName("");
       setCustomFeedUrl("");
+      setCustomDescription(null);
     } catch (err) {
       if (err instanceof ApiError) {
         const message =
@@ -148,21 +180,23 @@ export function SourceManager({
               key={source.id}
               className="flex items-center justify-between gap-2 text-sm"
             >
-              <button
-                type="button"
-                onClick={() =>
-                  onSelectSource(
-                    selectedSourceId === source.id ? null : source.id,
-                  )
-                }
-                className={
-                  selectedSourceId === source.id
-                    ? "cursor-pointer font-medium text-foreground"
-                    : "cursor-pointer hover:text-foreground"
-                }
-              >
-                {source.name}
-              </button>
+              <SourceDescription source={source}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSelectSource(
+                      selectedSourceId === source.id ? null : source.id,
+                    )
+                  }
+                  className={
+                    selectedSourceId === source.id
+                      ? "cursor-pointer font-medium text-foreground"
+                      : "cursor-pointer hover:text-foreground"
+                  }
+                >
+                  {source.name}
+                </button>
+              </SourceDescription>
               <span className="flex items-center gap-1">
                 <button
                   type="button"
@@ -219,13 +253,15 @@ export function SourceManager({
               <ul className="flex flex-col gap-1">
                 {catalogSources.map((source) => (
                   <li key={source.id} className="text-sm">
-                    <button
-                      type="button"
-                      onClick={() => onAddExisting(source.id)}
-                      className="cursor-pointer text-zinc-500 hover:text-foreground"
-                    >
-                      {source.name}
-                    </button>
+                    <SourceDescription source={source}>
+                      <button
+                        type="button"
+                        onClick={() => onAddExisting(source.id)}
+                        className="cursor-pointer text-zinc-500 hover:text-foreground"
+                      >
+                        {source.name}
+                      </button>
+                    </SourceDescription>
                   </li>
                 ))}
               </ul>
