@@ -79,7 +79,15 @@ this project — Next.js owns all rendering.
 
 ## Auth & permissions
 
-- Standard registration/login (Laravel Sanctum-backed).
+- Sign-in is Jepflow SSO only (`SsoController`). There is **no local `users`
+  table**: the SSO user id is the identity, stored as `user_id` in the
+  per-user tables (no FK; the SSO database is separate). `App\Models\User` is
+  a non-persisted model built from the profile kept in the session
+  (`App\Auth\SsoUserProvider`), so relations like `$user->todos()` still
+  work but `save()` throws. Sessions last `SESSION_LIFETIME` (no remember-me).
+- Admins are the SSO ids in `ADMIN_SSO_IDS` (`config('auth.admin_sso_ids')`).
+- Per-user settings and the "already onboarded" marker live in
+  `user_preferences` (keyed by SSO id).
 - Basic role/permission system — a single "user" role is enough to start;
   design the permission checks so an "admin" role can be added later without
   restructuring.

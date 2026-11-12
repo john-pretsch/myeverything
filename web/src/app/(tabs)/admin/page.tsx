@@ -1,10 +1,5 @@
-import { TopicManager } from "@/components/admin/topic-manager";
-import { RequireAdmin } from "@/components/require-admin";
+import { redirect } from "next/navigation";
 
 export default function AdminPage() {
-  return (
-    <RequireAdmin>
-      <TopicManager />
-    </RequireAdmin>
-  );
+  redirect("/admin/news");
 }

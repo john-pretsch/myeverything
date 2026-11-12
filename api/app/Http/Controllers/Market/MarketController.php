@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Market;
 
 use App\Http\Controllers\Controller;
+use App\Models\UserPreference;
 use App\Services\Market\MarketDataService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -76,16 +77,23 @@ class MarketController extends Controller
             'movers_region' => ['required', 'string', Rule::in(MarketDataService::MOVER_REGIONS)],
         ]);
 
-        $user = $request->user();
-        $user->update(['preferences' => [...($user->preferences ?? []), ...$validated]]);
+        UserPreference::updateOrCreate(
+            ['user_id' => $request->user()->id],
+            ['preferences' => [...$this->savedPreferences($request), ...$validated]],
+        );
 
         return response()->json(['data' => $this->moverPreferences($request)]);
+    }
+
+    private function savedPreferences(Request $request): array
+    {
+        return UserPreference::find($request->user()->id)?->preferences ?? [];
     }
 
     /** @return array{movers_count: int, movers_region: string} */
     private function moverPreferences(Request $request): array
     {
-        $saved = $request->user()->preferences ?? [];
+        $saved = $this->savedPreferences($request);
 
         return [
             'movers_count' => in_array($saved['movers_count'] ?? null, MarketDataService::MOVER_COUNTS, true)

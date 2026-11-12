@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\NewsSource;
+use App\Auth\SsoUserProvider;
 use App\Models\User;
+use App\Models\UserPreference;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -22,34 +24,29 @@ class SsoController extends Controller
     {
         $ssoUser = Socialite::driver('jepflow_sso')->user();
 
-        $user = User::where('sso_id', $ssoUser->id)->first();
+        $user = User::fromSso([
+            'id' => $ssoUser->id,
+            'name' => $ssoUser->name,
+            'email' => $ssoUser->email,
+        ]);
 
-        if (! $user) {
-            $user = User::where('email', $ssoUser->email)->first();
+        $onboarding = UserPreference::firstOrCreate(['user_id' => $user->id]);
 
-            if ($user) {
-                $user->update(['sso_id' => $ssoUser->id]);
-            }
-        }
-
-        if (! $user) {
-            $user = User::create([
-                'name' => $ssoUser->name,
-                'email' => $ssoUser->email,
-                'sso_id' => $ssoUser->id,
-                'password' => null,
-                'email_verified_at' => now(),
-            ]);
-
+        if ($onboarding->wasRecentlyCreated) {
             $defaultSourceIds = NewsSource::where('is_default', true)->orderBy('name')->pluck('id');
             $user->newsSources()->attach(
                 $defaultSourceIds->mapWithKeys(fn ($id, $position) => [$id => ['position' => $position]]),
             );
         }
 
-        Auth::login($user, remember: true);
+        Auth::login($user);
 
         request()->session()->regenerate();
+        request()->session()->put(SsoUserProvider::SESSION_KEY, [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+        ]);
 
         return redirect(config('services.jepflow_sso.frontend_redirect'));
     }

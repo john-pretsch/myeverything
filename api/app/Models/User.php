@@ -2,36 +2,39 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
-use Illuminate\Notifications\Notifiable;
-use Laravel\Sanctum\HasApiTokens;
+use LogicException;
 
-#[Fillable(['name', 'email', 'password', 'sso_id', 'preferences'])]
-#[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
+/**
+ * The signed-in person, as reported by Jepflow SSO. There is no users table:
+ * the id is the SSO user id, which the per-user tables store as `user_id`.
+ * Instances are built from the profile kept in the session and are never
+ * persisted, so only relations (not save/update) are meaningful.
+ */
 class User extends Authenticatable
 {
-    /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, Notifiable;
+    public $incrementing = false;
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
-    protected function casts(): array
+    /** @param array{id: int|string, name?: ?string, email?: ?string} $profile */
+    public static function fromSso(array $profile): static
     {
-        return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
-            'preferences' => 'array',
-        ];
+        $user = new static;
+        $user->forceFill([
+            'id' => (int) $profile['id'],
+            'name' => $profile['name'] ?? null,
+            'email' => $profile['email'] ?? null,
+        ]);
+        $user->exists = true;
+
+        return $user;
+    }
+
+    public function save(array $options = []): never
+    {
+        throw new LogicException('Users live in Jepflow SSO and cannot be saved here.');
     }
 
     public function newsSources(): BelongsToMany
@@ -72,8 +75,23 @@ class User extends Authenticatable
         return $this->hasMany(BrainiacAttempt::class);
     }
 
+    public function preferences(): HasOne
+    {
+        return $this->hasOne(UserPreference::class);
+    }
+
     public function isAdmin(): bool
     {
-        return $this->role === 'admin';
+        return in_array($this->id, config('auth.admin_sso_ids'), true);
+    }
+
+    public function toArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'email' => $this->email,
+            'role' => $this->isAdmin() ? 'admin' : 'user',
+        ];
     }
 }

@@ -63,15 +63,21 @@ return [
 
     'providers' => [
         'users' => [
-            'driver' => 'eloquent',
-            'model' => env('AUTH_MODEL', User::class),
+            'driver' => 'sso',
         ],
-
-        // 'users' => [
-        //     'driver' => 'database',
-        //     'table' => 'users',
-        // ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Admin SSO user ids
+    |--------------------------------------------------------------------------
+    |
+    | Jepflow SSO user ids (comma-separated in ADMIN_SSO_IDS) that get the
+    | admin role here. There is no local users table to hold a role.
+    |
+    */
+
+    'admin_sso_ids' => array_map('intval', array_filter(explode(',', env('ADMIN_SSO_IDS', '')))),
 
     /*
     |--------------------------------------------------------------------------

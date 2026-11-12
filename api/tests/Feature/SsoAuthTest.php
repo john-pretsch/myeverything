@@ -23,37 +23,57 @@ class SsoAuthTest extends TestCase
         Socialite::shouldReceive('driver')->with('jepflow_sso')->andReturn($driver);
     }
 
-    public function test_new_sso_user_is_created_with_default_news_sources(): void
+    public function test_first_login_attaches_default_news_sources_once(): void
     {
         $default = NewsSource::forceCreate(['name' => 'Default', 'site_url' => 'https://a.test', 'feed_url' => 'https://a.test/rss', 'is_default' => true]);
         NewsSource::forceCreate(['name' => 'Other', 'site_url' => 'https://b.test', 'feed_url' => 'https://b.test/rss', 'is_default' => false]);
 
-        $this->fakeSsoCallback('sso-1', 'jane@example.com', 'Jane');
+        $this->fakeSsoCallback('7', 'jane@example.com', 'Jane');
 
         $this->get('/api/auth/sso/callback')->assertRedirect(config('services.jepflow_sso.frontend_redirect'));
 
-        $user = User::where('sso_id', 'sso-1')->firstOrFail();
-        $this->assertAuthenticatedAs($user);
-        $this->assertSame([$default->id], $user->newsSources()->pluck('news_sources.id')->all());
-    }
+        $this->assertSame(7, auth()->id());
+        $this->assertSame([$default->id], User::fromSso(['id' => 7])->newsSources()->pluck('news_sources.id')->all());
 
-    public function test_existing_local_user_is_linked_without_resetting_sources(): void
-    {
-        $user = User::factory()->create(['email' => 'jane@example.com']);
-        NewsSource::forceCreate(['name' => 'Default', 'site_url' => 'https://a.test', 'feed_url' => 'https://a.test/rss', 'is_default' => true]);
-
-        $this->fakeSsoCallback('sso-1', 'jane@example.com', 'Jane');
-
+        User::fromSso(['id' => 7])->newsSources()->detach();
         $this->get('/api/auth/sso/callback');
 
-        $this->assertAuthenticatedAs($user->fresh());
-        $this->assertSame('sso-1', $user->fresh()->sso_id);
-        $this->assertSame(0, $user->newsSources()->count());
+        $this->assertSame(0, User::fromSso(['id' => 7])->newsSources()->count());
+    }
+
+    public function test_session_user_comes_from_the_sso_profile(): void
+    {
+        $this->fakeSsoCallback('7', 'jane@example.com', 'Jane');
+        $this->get('/api/auth/sso/callback');
+
+        $this->getJson('/api/user')
+            ->assertOk()
+            ->assertExactJson(['id' => 7, 'name' => 'Jane', 'email' => 'jane@example.com', 'role' => 'user']);
+    }
+
+    public function test_admin_role_comes_from_configured_sso_ids(): void
+    {
+        config(['auth.admin_sso_ids' => [7]]);
+
+        $this->assertTrue(User::fromSso(['id' => 7])->isAdmin());
+        $this->assertFalse(User::fromSso(['id' => 8])->isAdmin());
+    }
+
+    public function test_market_preferences_are_saved_per_sso_user(): void
+    {
+        $this->actingAs(User::fromSso(['id' => 7]))
+            ->putJson('/api/market/preferences', ['movers_count' => 25, 'movers_region' => 'ca'])
+            ->assertOk();
+
+        $this->actingAs(User::fromSso(['id' => 7]))
+            ->getJson('/api/market/preferences')
+            ->assertJsonPath('data.movers_count', 25)
+            ->assertJsonPath('data.movers_region', 'ca');
     }
 
     public function test_callback_gets_a_session_even_when_referred_by_the_idp(): void
     {
-        $this->fakeSsoCallback('sso-1', 'jane@example.com', 'Jane');
+        $this->fakeSsoCallback('7', 'jane@example.com', 'Jane');
 
         $this->withHeader('Referer', 'https://sso.jepflow.io/login')
             ->get('/api/auth/sso/callback')
@@ -77,7 +97,7 @@ class SsoAuthTest extends TestCase
             'services.jepflow_sso.frontend_redirect' => 'https://myeverything.jepflow.io',
         ]);
 
-        $this->actingAs(User::factory()->create())
+        $this->actingAs(User::fromSso(['id' => 7]))
             ->withHeader('Referer', 'http://localhost:3000/')
             ->postJson('/api/logout')
             ->assertOk()

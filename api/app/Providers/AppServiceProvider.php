@@ -2,7 +2,9 @@
 
 namespace App\Providers;
 
+use App\Auth\SsoUserProvider;
 use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -20,6 +22,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Auth::provider('sso', fn ($app) => new SsoUserProvider($app['session.store']));
+
         // This app has no server-rendered login page to redirect guests to
         // (Next.js owns the UI) — always fall through to the standard
         // AuthenticationException, which renders as JSON 401 for api/* per

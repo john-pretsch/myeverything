@@ -6,6 +6,7 @@ use App\Models\NewsSource;
 use App\Models\Topic;
 use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 class NewsSourceSeeder extends Seeder
 {
@@ -180,7 +181,8 @@ class NewsSourceSeeder extends Seeder
         // New is_default sources only auto-attach to users created from now
         // on (see SsoController::callback); backfill everyone who already
         // has an account so they see the new topic too.
-        User::all()->each(function (User $user) use ($newlyDefaulted) {
+        DB::table('user_preferences')->pluck('user_id')->each(function ($userId) use ($newlyDefaulted) {
+            $user = User::fromSso(['id' => $userId]);
             $alreadyHas = $user->newsSources()->pluck('news_sources.id');
             $toAttach = $newlyDefaulted->reject(fn ($s) => $alreadyHas->contains($s->id));
 
