@@ -12,6 +12,7 @@ use App\Http\Controllers\News\SourceController;
 use App\Http\Controllers\News\TagController;
 use App\Http\Controllers\News\TopicController;
 use App\Http\Controllers\ResumeController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ResumeTailoringController;
 use App\Http\Controllers\TodoController;
 use Illuminate\Support\Facades\Route;
@@ -52,7 +53,9 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin/topics')->group(func
     Route::delete('/{topic}/sources/{source}', [AdminTopicController::class, 'detachSource']);
 });
 
+Route::get('/dashboard/alerts', [DashboardController::class, 'alerts'])->middleware('throttle:60,1');
 Route::get('/market/overview', [MarketController::class, 'overview']);
+Route::get('/market/currency-trends', [MarketController::class, 'currencyTrends']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/market/preferences', [MarketController::class, 'preferences']);
     Route::put('/market/preferences', [MarketController::class, 'updatePreferences']);

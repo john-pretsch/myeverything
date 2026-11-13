@@ -1,6 +1,7 @@
 import { apiFetch } from "./api";
 import type {
   ChartRange,
+  CurrencyTrends,
   MarketOverview,
   MoverCount,
   MoverRegion,
@@ -65,6 +66,13 @@ export async function getStockChart(
 ): Promise<StockChart> {
   const res = await apiFetch<{ data: StockChart }>(
     `/api/market/stocks/${encodeURIComponent(symbol)}/chart?range=${range}`,
+  );
+  return res.data;
+}
+
+export async function getCurrencyTrends(): Promise<CurrencyTrends> {
+  const res = await apiFetch<{ data: CurrencyTrends }>(
+    "/api/market/currency-trends",
   );
   return res.data;
 }

@@ -63,6 +63,60 @@ class MarketDataService
         ];
     }
 
+    /**
+     * 30 days of daily rates for the three pairs the dashboard charts.
+     * EUR/CAD is derived from the two USD pairs.
+     */
+    public function currencyTrends(): array
+    {
+        return Cache::remember('market:currency-trends', now()->addHour(), function () {
+            try {
+                $response = Http::timeout(10)
+                    ->withUserAgent(self::USER_AGENT)
+                    ->get('https://api.frankfurter.dev/v1/'.now()->subDays(30)->toDateString().'..', [
+                        'base' => 'USD',
+                        'symbols' => 'CAD,EUR',
+                    ]);
+
+                if (! $response->successful()) {
+                    throw new \RuntimeException("HTTP {$response->status()}");
+                }
+
+                $days = collect($response->json('rates', []))->filter(fn ($r) => isset($r['CAD'], $r['EUR']));
+
+                if ($days->count() < 2) {
+                    throw new \RuntimeException('Not enough history');
+                }
+
+                $series = [
+                    'USD/CAD' => $days->map(fn ($r) => $r['CAD']),
+                    'USD/EUR' => $days->map(fn ($r) => $r['EUR']),
+                    'EUR/CAD' => $days->map(fn ($r) => $r['CAD'] / $r['EUR']),
+                ];
+
+                $items = [];
+                foreach ($series as $pair => $values) {
+                    $points = $values->map(fn ($v, $date) => ['t' => $date, 'c' => round($v, 5)])->values();
+                    $first = $points->first()['c'];
+                    $last = $points->last()['c'];
+
+                    $items[] = [
+                        'pair' => $pair,
+                        'rate' => $last,
+                        'change_pct' => $first > 0 ? round(($last - $first) / $first * 100, 2) : null,
+                        'points' => $points->all(),
+                    ];
+                }
+
+                return ['items' => $items, 'error' => null];
+            } catch (\Throwable $e) {
+                Log::warning('Failed to fetch currency trends', ['error' => $e->getMessage()]);
+
+                return ['items' => [], 'error' => 'Currency trends are unavailable right now.'];
+            }
+        });
+    }
+
     private function currencies(): array
     {
         return Cache::remember('market:currencies', now()->addMinutes(5), function () {

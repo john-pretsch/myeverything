@@ -83,3 +83,12 @@ export type StockChart = {
   previous_close: number | null;
   points: { t: number; o: number; h: number; l: number; c: number }[];
 };
+
+export type CurrencyTrend = {
+  pair: string;
+  rate: number;
+  change_pct: number | null;
+  points: { t: string; c: number }[];
+};
+
+export type CurrencyTrends = { items: CurrencyTrend[]; error: string | null };

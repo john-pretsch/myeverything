@@ -1,10 +1,5 @@
-import { RequireAuth } from "@/components/require-auth";
-import { TodoList } from "@/components/todo/todo-list";
+import { redirect } from "next/navigation";
 
 export default function TodoPage() {
-  return (
-    <RequireAuth>
-      <TodoList />
-    </RequireAuth>
-  );
+  redirect("/");
 }

@@ -7,14 +7,44 @@ import { getMarketOverview } from "@/lib/market";
 import { useAuth } from "@/lib/auth-context";
 
 const TABS = [
-  { href: "/news", label: "News Feed", requiresAuth: false, requiresAdmin: false },
-  { href: "/market", label: "Market Info", requiresAuth: false, requiresAdmin: false },
-  { href: "/todo", label: "Todo", requiresAuth: true, requiresAdmin: false },
-  { href: "/gig-leads", label: "Pro Resources", requiresAuth: true, requiresAdmin: false },
-  { href: "/weather", label: "Weather", requiresAuth: false, requiresAdmin: false },
-  { href: "/brainiac", label: "Brainiac", requiresAuth: true, requiresAdmin: false },
+  { href: "/", label: "Dashboard", requiresAuth: false, requiresAdmin: false },
+  {
+    href: "/news",
+    label: "News Feed",
+    requiresAuth: false,
+    requiresAdmin: false,
+  },
+  {
+    href: "/market",
+    label: "Market Info",
+    requiresAuth: false,
+    requiresAdmin: false,
+  },
+  {
+    href: "/gig-leads",
+    label: "Pro Resources",
+    requiresAuth: true,
+    requiresAdmin: false,
+  },
+  {
+    href: "/weather",
+    label: "Weather",
+    requiresAuth: false,
+    requiresAdmin: false,
+  },
+  {
+    href: "/brainiac",
+    label: "Brainiac",
+    requiresAuth: true,
+    requiresAdmin: false,
+  },
   { href: "/admin", label: "Admin", requiresAuth: true, requiresAdmin: true },
 ] as const;
+
+function isActive(pathname: string, href: string): boolean {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 function AuthControls({ onNavigate }: { onNavigate?: () => void }) {
   const { user, status, logout } = useAuth();
@@ -138,8 +168,7 @@ export function TabNav() {
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4">
         <ul className="hidden flex-wrap gap-1 md:flex">
           {visibleTabs.map((tab) => {
-            const active =
-              pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+            const active = isActive(pathname, tab.href);
             return (
               <li key={tab.href}>
                 <Link
@@ -196,8 +225,7 @@ export function TabNav() {
         <div className="border-t border-black/10 px-4 py-3 md:hidden dark:border-white/10">
           <ul className="flex flex-col gap-1">
             {visibleTabs.map((tab) => {
-              const active =
-              pathname === tab.href || pathname.startsWith(`${tab.href}/`);
+              const active = isActive(pathname, tab.href);
               return (
                 <li key={tab.href}>
                   <Link

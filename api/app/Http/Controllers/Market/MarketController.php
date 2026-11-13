@@ -19,6 +19,11 @@ class MarketController extends Controller
         ]);
     }
 
+    public function currencyTrends(MarketDataService $market): JsonResponse
+    {
+        return response()->json(['data' => $market->currencyTrends()]);
+    }
+
     public function movers(Request $request, MarketDataService $market): JsonResponse
     {
         $validated = $request->validate([

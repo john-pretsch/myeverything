@@ -91,10 +91,25 @@ this project — Next.js owns all rendering.
 - Basic role/permission system — a single "user" role is enough to start;
   design the permission checks so an "admin" role can be added later without
   restructuring.
-- Gated tabs (require login): **Todo**, **Gig Leads**.
+- Gated tabs (require login): **Gig Leads**. Todos live on the dashboard.
 - Public tabs (no login required): **News Feed**, **Market Info**, **Weather**.
 
 ## Tabs
+
+### Dashboard (public, the home page `/`) — implemented
+- Alerts on top (`GET /api/dashboard/alerts`, `App\Services\Alerts\AlertService`,
+  cached 5 min, each source fails independently): CISA Known Exploited
+  Vulnerabilities JSON (added in the last 7 days; ransomware-linked first),
+  SANS ISC infocon when not green, and "breaking" news inferred from
+  `news_articles` of `is_default` sources — a story covered by 3+ distinct
+  sources in 6 h, or a BREAKING/JUST IN/LIVE headline. Thresholds are
+  constants in the service. CISA's RSS advisory feed 403s from this box, so
+  it isn't used. Dismissed alerts are remembered per browser (localStorage).
+- Markets: index tiles (existing overview + 1-month `stockChart`) and
+  USD/CAD, USD/EUR, EUR/CAD tiles from `GET /api/market/currency-trends`
+  (Frankfurter, 30 days, cached 1 h).
+- Todo: the same `TodoList` component, shown when logged in; the standalone
+  Todo tab is gone (`/todo` redirects to `/`).
 
 ### News Feed (public) — implemented
 - Seeded sources: WSJ, CBC, BBC, Al Jazeera, Techdirt (`news_sources`,
